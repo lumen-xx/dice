@@ -148,12 +148,21 @@ struct ImageItem: Identifiable {
         if !preferences.exportFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: preferences.exportFolder) }
         if panel.runModal() == .OK, let url = panel.url { preferences.exportFolder = url.path; preferences.useExportFolder = true }
     }
-    func process() {
+    /// Runs the conversion. A nil action follows the saved defaults; an action overrides the destination for this run only.
+    func process(_ action: ExportAction? = nil) {
         guard !busy, !importing, !items.isEmpty else { return }
-        let clipboard = preferences.exportMode == .clipboard
-        if !clipboard && preferences.useExportFolder && preferences.exportFolder.isEmpty { alert = "Choose a default export folder in Settings."; settingsPresented = true; return }
-        let exportDirectory = preferences.useExportFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
+        let clipboard = action == .clipboard || (action == nil && preferences.exportMode == .clipboard)
+        let edit = action == .edit
+        let skipSave = clipboard || edit
+        var useFolder = action == .folder || (action == nil && preferences.useExportFolder)
+        if !skipSave && useFolder && preferences.exportFolder.isEmpty {
+            if action == .folder { chooseExportFolder(); if preferences.exportFolder.isEmpty { return } }
+            else { alert = "Choose a default export folder in Settings."; settingsPresented = true; return }
+        }
+        if skipSave { useFolder = false }
+        let exportDirectory = useFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
         var snapshot = options
+        if let action { snapshot.replaceOriginals = action == .replace }
         if preferences.alwaysStripMetadata { snapshot.stripMetadata = true }
         snapshot.flattenColor = preferences.flattenColor
         snapshot.keepAnimation = preferences.keepAnimation
@@ -181,8 +190,8 @@ struct ImageItem: Identifiable {
                 case .success(let output?):
                     items[index].result = output; items[index].error = nil
                     // PDFs, SVGs and multi-frame files produce one output per page, so they are never replaced in place.
-                    let replace = snapshot.replaceOriginals && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1 && !clipboard
-                    let saved: Result<URL, Error>? = clipboard ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
+                    let replace = snapshot.replaceOriginals && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1 && !skipSave
+                    let saved: Result<URL, Error>? = skipSave ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
                     var replacedHere = false
                     switch saved {
                     case nil: break
@@ -201,26 +210,41 @@ struct ImageItem: Identifiable {
             }
             var copied = 0
             if clipboard && !cancelRequested && !closeRequested { copied = copyResultsToClipboard() }
+            var opened = 0
+            if edit && !cancelRequested && !closeRequested { opened = openResultsInEditor() }
             busy = false
             if closeRequested { clear(); return }
-            status = clipboard && copied > 0 ? "Copied \(copied) image\(copied == 1 ? "" : "s") to the clipboard" : cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
+            status = edit && opened > 0 ? "Opened \(opened) image\(opened == 1 ? "" : "s") for editing" : clipboard && copied > 0 ? "Copied \(copied) image\(copied == 1 ? "" : "s") to the clipboard" : cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
             else if !cancelRequested { onFinished?() }
         }
     }
     /// Puts the processed images on the clipboard: image data for one still image, file URLs otherwise.
     /// Files are copied out of the session folder first so a paste still works after Dice closes.
-    func copyResultsToClipboard() -> Int {
+    func stagedResults() throws -> (urls: [URL], outputs: [ConversionResult]) {
         let outputs = results.compactMap { $0.result }
-        guard !outputs.isEmpty else { return 0 }
+        guard !outputs.isEmpty else { return ([], []) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("com.opyuii.dice-clipboard/" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var urls: [URL] = []
+        for output in outputs {
+            let target = Engine.uniqueURL(in: folder, stem: output.url.deletingPathExtension().lastPathComponent, ext: output.url.pathExtension)
+            try FileManager.default.copyItem(at: output.url, to: target); urls.append(target)
+        }
+        return (urls, outputs)
+    }
+    /// Opens the processed images in the default app (usually Preview) from a copy that outlives Dice's session.
+    func openResultsInEditor() -> Int {
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            var urls: [URL] = []
-            for output in outputs {
-                let target = Engine.uniqueURL(in: folder, stem: output.url.deletingPathExtension().lastPathComponent, ext: output.url.pathExtension)
-                try FileManager.default.copyItem(at: output.url, to: target); urls.append(target)
-            }
+            let staged = try stagedResults()
+            for url in staged.urls { NSWorkspace.shared.open(url) }
+            return staged.urls.count
+        } catch { alert = "Could not open the images: " + error.localizedDescription; return 0 }
+    }
+    func copyResultsToClipboard() -> Int {
+        do {
+            let (urls, outputs) = try stagedResults()
+            guard !outputs.isEmpty else { return 0 }
             let pasteboard = NSPasteboard.general; pasteboard.clearContents()
             if urls.count == 1, !outputs[0].isFolder, let image = NSImage(contentsOf: urls[0]) {
                 let item = NSPasteboardItem()

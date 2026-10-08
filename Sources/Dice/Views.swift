@@ -10,6 +10,7 @@ struct DiceView: View {
     let close: () -> Void
     var checkUpdates: () -> Void = {}
     @State private var imageSettingsPresented = false
+    @State private var exportPopoverPresented = false
     @State private var metadata = false
     @State private var batch = false
     @State private var batchSearch = ""
@@ -134,8 +135,9 @@ struct DiceView: View {
                     .popover(isPresented: $imageSettingsPresented, arrowEdge: .top) { imageSettingsPanel }
             }
             if !model.settingsPresented {
-            icon("play.fill", "Start with current settings (right-click for export options)") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
-                .contextMenu { exportMenu }
+            icon("play.fill", "Start with current settings (right-click for more export options)") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
+                .overlay { RightClickCatcher { if !(model.busy || model.importing || model.items.isEmpty) { exportPopoverPresented = true } } }
+                .popover(isPresented: $exportPopoverPresented, arrowEdge: .top) { exportPopover }
             }
         }
         .buttonStyle(.plain)
@@ -176,18 +178,36 @@ struct DiceView: View {
         if let item = model.items.first(where: { $0.id == id }) { Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.savedURL ?? item.url]) } }
     }
     /// Right-click menu on the start icon: where results go, and whether originals are replaced.
-    @ViewBuilder var exportMenu: some View {
-        ForEach(ExportMode.allCases) { mode in
-            Button { model.preferences.exportMode = mode } label: { Text(mode.rawValue); if model.preferences.exportMode == mode { Image(systemName: "checkmark") } }
+    var exportPopover: some View {
+        let folderName = model.preferences.exportFolder.isEmpty ? "Choose a folder…" : URL(fileURLWithPath: model.preferences.exportFolder).lastPathComponent
+        let rows: [(ExportAction, String, String, String)] = [
+            (.beside, "square.and.arrow.down", "Save copies beside originals", "Next to each source file"),
+            (.folder, "folder", "Save to folder", folderName),
+            (.replace, "arrow.triangle.2.circlepath", "Replace originals", "Originals go to the Trash"),
+            (.clipboard, "doc.on.clipboard", "Copy to clipboard", "Paste into any app"),
+            (.edit, "pencil.and.outline", "Open to edit", "Opens results in your image editor"),
+        ]
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("Export").font(DiceStyle.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 4)
+            ForEach(rows, id: \.0) { action, symbol, title, detail in
+                Button { exportPopoverPresented = false; imageSettingsPresented = false; model.process(action) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: symbol).frame(width: 18).foregroundStyle(accent)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(title).font(.system(size: 13))
+                            Text(detail).font(DiceStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+            Divider().padding(.vertical, 4)
+            Button { exportPopoverPresented = false; model.chooseExportFolder() } label: {
+                Text("Choose export folder…").font(DiceStyle.caption).padding(.horizontal, 10)
+            }.buttonStyle(.plain).foregroundStyle(.secondary)
         }
-        Divider()
-        Button { model.preferences.useExportFolder = false } label: { Text("Save beside originals"); if !model.preferences.useExportFolder { Image(systemName: "checkmark") } }
-        Button { if model.preferences.exportFolder.isEmpty { model.chooseExportFolder() } else { model.preferences.useExportFolder = true } } label: {
-            Text(model.preferences.exportFolder.isEmpty ? "Save to a folder…" : "Save to \(URL(fileURLWithPath: model.preferences.exportFolder).lastPathComponent)"); if model.preferences.useExportFolder { Image(systemName: "checkmark") } }
-        Button("Choose Export Folder…") { model.chooseExportFolder() }
-        Divider()
-        Button { model.options.replaceOriginals.toggle() } label: { Text("Replace originals"); if model.options.replaceOriginals { Image(systemName: "checkmark") } }
-            .disabled(model.preferences.exportMode == .clipboard)
+        .padding(.vertical, 10).frame(width: 270)
     }
     var flattenColor: Binding<Color> {
         Binding(get: { let c = model.preferences.flattenColor + [1, 1, 1]; return Color(.sRGB, red: c[0], green: c[1], blue: c[2]) },
@@ -361,6 +381,23 @@ struct InfoTip: View {
                 Text(text).font(DiceStyle.caption).fixedSize(horizontal: false, vertical: true).frame(width: 220, alignment: .leading).padding(10)
             }
             .accessibilityLabel("More information").accessibilityHint(text)
+    }
+}
+
+/// Reports right-clicks (and control-clicks) on top of a view while letting every other event through.
+struct RightClickCatcher: NSViewRepresentable {
+    let action: () -> Void
+    func makeNSView(context: Context) -> CatcherView { CatcherView() }
+    func updateNSView(_ view: CatcherView, context: Context) { view.action = action }
+    final class CatcherView: NSView {
+        var action: () -> Void = {}
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent else { return nil }
+            let secondary = event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+            return secondary ? super.hitTest(point) : nil
+        }
+        override func rightMouseDown(with event: NSEvent) { action() }
+        override func mouseDown(with event: NSEvent) { action() }
     }
 }
 

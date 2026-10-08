@@ -60,3 +60,9 @@ struct AppPreferences: Codable, Equatable {
         dragTarget = (try? c.decodeIfPresent(DragTarget.self, forKey: .dragTarget)) ?? d.dragTarget
     }
 }
+
+/// One-off destinations offered by the popover on the start button.
+enum ExportAction: String, CaseIterable, Identifiable {
+    case beside, folder, replace, clipboard, edit
+    var id: String { rawValue }
+}
