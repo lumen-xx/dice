@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 
 struct ImageItem: Identifiable {
     let id = UUID()
-    let url: URL
+    var url: URL
     var page = 1
     var name: String {
         if url.pathExtension.lowercased() == "pdf" { return "\(url.lastPathComponent) · Page \(page)" }
@@ -125,16 +125,18 @@ struct ImageItem: Identifiable {
         if !preferences.exportFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: preferences.exportFolder) }
         if panel.runModal() == .OK, let url = panel.url { preferences.exportFolder = url.path; preferences.useExportFolder = true }
     }
-    func process(resizeOnly: Bool = false) {
+    func process() {
         guard !busy, !importing, !items.isEmpty else { return }
         if preferences.useExportFolder && preferences.exportFolder.isEmpty { alert = "Choose a default export folder in Settings."; settingsPresented = true; return }
         let exportDirectory = preferences.useExportFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
         let snapshot = options
+        let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly
         busy = true; cancelRequested = false; completed = 0
         for i in items.indices {
             if let result = items[i].result { previewCache.remove(items[i].previewCacheKey); try? FileManager.default.removeItem(at: result.url) }
             items[i].previewGeneration = UUID(); items[i].result = nil; items[i].resultInfo = nil; items[i].savedURL = nil; items[i].rebuildSearch()
         }
+        var replaced = 0
         Task {
             for index in items.indices {
                 if cancelRequested { break }
@@ -148,13 +150,19 @@ struct ImageItem: Identifiable {
                 case .success(nil): items[index].error = nil
                 case .success(let output?):
                     items[index].result = output; items[index].error = nil
-                    let saved = await Task.detached(priority: .userInitiated) { Result { try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
+                    // PDFs, SVGs and multi-frame files produce one output per page, so they are never replaced in place.
+                    let replace = snapshot.replaceOriginals && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1
+                    let saved = await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
+                    var replacedHere = false
                     switch saved {
-                    case .success(let url): items[index].savedURL = url
-                    case .failure(let error): items[index].error = "Processed, but could not save the copy: " + error.localizedDescription + " Use Dice → Save Copies As… to choose another folder."
+                    case .success(let url):
+                        items[index].savedURL = url
+                        if replace { replacedHere = true; previewCache.remove(PreviewCache.key(input, page: page)); items[index].url = url; replaced += 1 }
+                    case .failure(let error): items[index].error = (replace ? "Processed, but could not replace the original: " : "Processed, but could not save the copy: ") + error.localizedDescription + (replace ? "" : " Use Dice → Save Copies As… to choose another folder.")
                     }
                     let info = await Task.detached { try? Engine.inspect(output.url) }.value
                     items[index].resultInfo = info
+                    if replacedHere, let info { items[index].info = info }
                 case .failure(let error): items[index].error = error.localizedDescription
                 }
                 items[index].rebuildSearch()
@@ -162,7 +170,7 @@ struct ImageItem: Identifiable {
             }
             busy = false
             if closeRequested { clear(); return }
-            status = cancelRequested ? "Stopped after the current image" : (resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
+            status = cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
         }
     }

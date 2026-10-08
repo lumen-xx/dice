@@ -172,7 +172,7 @@ struct DiceView: View {
             Picker("Default format", selection: $model.preferences.exportFormat) {
                 ForEach(OutputFormat.allCases.filter { $0 != .original }) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) }
             }.disabled(!model.preferences.useExportFormat)
-            Text("Folder off: save beside originals. Format off: keep the source format. Format defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)
             Text("Updates").font(DiceStyle.heading)
             Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
@@ -182,27 +182,21 @@ struct DiceView: View {
     var imageSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Image settings").font(DiceStyle.heading)
-            Toggle("Metadata only", isOn: $model.options.metadataOnly).font(DiceStyle.caption)
+            Toggle("Metadata only", isOn: $model.options.metadataOnly)
             if !model.options.metadataOnly {
                 Picker("Format", selection: $model.options.format) { ForEach(OutputFormat.allCases) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) } }
                 Picker("Resize", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }
                 if model.options.resize == .edge { HStack { Text("Longest edge"); number($model.options.edge); Text("px") } }
                 if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
                 if model.options.resize == .fit { HStack { number($model.options.width); Text("×"); number($model.options.height); Text("px") } }
-                if model.options.format.usesQuality { HStack { Text("Quality"); Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() } }
+                if model.options.resize != .original { Toggle("Resize only", isOn: $model.options.resizeOnly).help("Keep format and metadata; skip images already within the target size") }
+                if model.options.format.usesQuality && !(model.options.resizeOnly && model.options.resize != .original) { HStack { Text("Quality"); Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() } }
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
             }
             Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly)
-            Text(model.options.metadataOnly ? "Pixels stay unchanged. Colour and orientation are retained." : "Copies save automatically. SVG/PDF become PNG by default; PDF renders at 144 dpi. No upscaling.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Resize all") { imageSettingsPresented = false; model.process(resizeOnly: true) }
-                    .disabled(model.busy || model.importing || model.items.isEmpty || model.options.resize == .original)
-                    .help("Change resolution only; preserve metadata and skip images already within the target size")
-                Spacer()
-                Button("Start") { imageSettingsPresented = false; model.process() }.buttonStyle(.borderedProminent).disabled(model.busy || model.importing || model.items.isEmpty)
-            }
-            Text("Resize all keeps the source format and metadata, skipping smaller images. Vector/RAW inputs become PNG copies.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 340).tint(accent)
+            Divider()
+            Toggle("Replace originals", isOn: $model.options.replaceOriginals).help("Move each original to the Trash and save the result under its name. PDFs, SVGs and multi-frame files are always saved as copies.")
+        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 360).tint(accent)
             .disabled(model.busy || model.importing)
     }
     func number(_ binding: Binding<Int>) -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel("Resize value") }

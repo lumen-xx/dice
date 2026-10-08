@@ -276,6 +276,21 @@ final class EngineTests {
         XCTAssertEqual(try Data(contentsOf: configured), try Data(contentsOf: result.url))
         XCTAssertEqual(try Data(contentsOf: input), original)
     }
+    func testReplaceOriginalAndLegacyOptions() throws {
+        let input = try fixture(name: "photo", format: UTType.png.identifier)
+        let temporary = directory.appendingPathComponent("processing")
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        var options = Options(); options.format = .jpeg
+        let result = try Engine.convert(input, options: options, directory: temporary)
+        let replaced = try Engine.replaceOriginal(input, with: result)
+        XCTAssertEqual(replaced.lastPathComponent, "photo.jpg")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: input.path))
+        XCTAssertEqual(try Data(contentsOf: replaced), try Data(contentsOf: result.url))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(".dice-") }.count, 0)
+        let legacy = Data(#"{"format":"PNG","resize":"Longest edge","edge":800,"percent":50,"width":1,"height":1,"quality":0.5,"stripMetadata":false,"metadataOnly":false,"webpLossless":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(Options.self, from: legacy)
+        XCTAssertEqual(decoded.edge, 800); XCTAssertFalse(decoded.replaceOriginals); XCTAssertFalse(decoded.resizeOnly)
+    }
     func testPreviewBudgetAndPageKeys() throws {
         let input = try fixture(width: 120, height: 80, format: UTType.png.identifier)
         let image = try Engine.previewImage(input, maxPixelSize: 120)
@@ -332,6 +347,7 @@ final class EngineTests {
             ("GIF and TIFF frame extraction", suite.testGIFAndTIFFFrameExtraction),
             ("resolution-only resize and smaller-image skipping", suite.testResizeOnlySkipsSmallAndPreservesMetadata),
             ("automatic save location and original preservation", suite.testSaveCopiesBesideOriginal),
+            ("replace original and legacy saved options", suite.testReplaceOriginalAndLegacyOptions),
             ("preview memory budget, eviction and page keys", suite.testPreviewBudgetAndPageKeys),
             ("preview decode and cache performance", suite.testPreviewPerformance),
             ("filename collisions", suite.testCollisionSafeNames)

@@ -47,4 +47,4 @@ Settings is a view inside the same window, opened with the sliders or Command-co
 
 App Settings share the editor surface and use Export defaults, Image settings and Updates sections. Folder and format defaults each have an explicit enable switch; update checks are opt-in. Scroll settings inside the window, keeping Back and the close control visible.
 
-App settings (Command-comma) contain only export defaults and updates inside the window. The sliders opens Image settings in an anchored popover for current conversion, resize, compression and metadata choices.
+App settings (Command-comma) contain only export defaults and updates inside the window. The sliders opens Image settings in an anchored popover for current conversion, resize, compression, metadata and replace-original choices. It has no action buttons; the toolbar Start is the single step that processes and saves.

@@ -39,7 +39,7 @@ final class DiceWindow: NSWindow {
     let model = DiceModel()
     lazy var updates = DiceUpdates(model: model)
     var window: NSWindow?
-    func applicationDidFinishLaunching(_ notification: Notification) { NSApp.servicesProvider = self; NSUpdateDynamicServices(); updates.start(); showWindow() }
+    func applicationDidFinishLaunching(_ notification: Notification) { if Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool != true { NSApp.servicesProvider = self; NSUpdateDynamicServices() }; updates.start(); showWindow() }
     @objc func showSettings(_ sender: Any?) { showWindow(); model.settingsPresented = true }
     @objc func saveCopies(_ sender: Any?) { model.save() }
     @objc func checkForUpdates(_ sender: Any?) { showWindow(); updates.check(sender) }

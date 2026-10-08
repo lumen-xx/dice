@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build an Apple-silicon development app using pinned Homebrew tool versions."""
-import pathlib, subprocess, shutil, plistlib, re, os, tempfile, json
+import pathlib, subprocess, shutil, plistlib, re, os, tempfile, json, argparse
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD = ROOT / 'build'
 APP = BUILD / 'Dice.app'
@@ -58,6 +58,10 @@ def prepare_tools(destination):
     (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\n' + call(str(binary), '-version') + '\n')
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dev', action='store_true', help='Build Dice Dev without Finder Services or file associations.')
+    args = parser.parse_args()
+    if args.dev: APP = BUILD / 'Dice Dev.app'
     run('swift', 'build', '-c', 'release', '--package-path', str(ROOT))
     if APP.exists(): shutil.rmtree(APP)
     contents = APP / 'Contents'
@@ -79,6 +83,11 @@ if __name__ == '__main__':
         NSSendFileTypes=['public.image', 'public.svg-image', 'com.adobe.pdf'],
         NSRequiredContext={'NSServiceApplicationIdentifier': 'com.apple.finder'}
     )]
+    plist['DiceDevelopmentBuild'] = args.dev
+    if args.dev:
+        plist.update(CFBundleIdentifier='com.opyuii.dice.dev', CFBundleName='Dice Dev', CFBundleDisplayName='Dice Dev')
+        plist.pop('NSServices', None)
+        plist.pop('CFBundleDocumentTypes', None)
     (contents / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('swift', str(ROOT / 'scripts/icon.swift'), str(BUILD))
     run('iconutil', '-c', 'icns', str(BUILD / 'Dice.iconset'), '-o', str(resources / 'Dice.icns'))
@@ -89,8 +98,8 @@ if __name__ == '__main__':
     size = sum(f.stat().st_size for f in APP.rglob('*') if f.is_file())
     print(f'Installed app: {size / 1_000_000:.2f} MB')
     if size >= 40_000_000: raise SystemExit('App exceeds the 40 MB budget')
-    archive = BUILD / ('Dice-v' + VERSION['version'] + '-apple-silicon.zip')
+    archive = BUILD / (('Dice-Dev-v' if args.dev else 'Dice-v') + VERSION['version'] + '-apple-silicon.zip')
     if archive.exists(): archive.unlink()
     run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(APP), str(archive))
-    (BUILD / 'app-path.txt').write_text(str(APP))
+    (BUILD / ('dev-app-path.txt' if args.dev else 'app-path.txt')).write_text(str(APP))
     print(f'Download: {archive.stat().st_size / 1_000_000:.2f} MB\n{APP}')

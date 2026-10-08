@@ -30,7 +30,26 @@ public struct Options: Sendable, Codable {
     public var stripMetadata = true
     public var metadataOnly = false
     public var webpLossless = false
+    /// Resolution-only run: keep format and metadata, skip images already within the target.
+    public var resizeOnly = false
+    /// Replace each original with its processed image (the original goes to the Trash).
+    public var replaceOriginals = false
     public init() {}
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        format = try c.decodeIfPresent(OutputFormat.self, forKey: .format) ?? format
+        resize = try c.decodeIfPresent(ResizeMode.self, forKey: .resize) ?? resize
+        edge = try c.decodeIfPresent(Int.self, forKey: .edge) ?? edge
+        percent = try c.decodeIfPresent(Int.self, forKey: .percent) ?? percent
+        width = try c.decodeIfPresent(Int.self, forKey: .width) ?? width
+        height = try c.decodeIfPresent(Int.self, forKey: .height) ?? height
+        quality = try c.decodeIfPresent(Double.self, forKey: .quality) ?? quality
+        stripMetadata = try c.decodeIfPresent(Bool.self, forKey: .stripMetadata) ?? stripMetadata
+        metadataOnly = try c.decodeIfPresent(Bool.self, forKey: .metadataOnly) ?? metadataOnly
+        webpLossless = try c.decodeIfPresent(Bool.self, forKey: .webpLossless) ?? webpLossless
+        resizeOnly = try c.decodeIfPresent(Bool.self, forKey: .resizeOnly) ?? resizeOnly
+        replaceOriginals = try c.decodeIfPresent(Bool.self, forKey: .replaceOriginals) ?? replaceOriginals
+    }
     public func longestEdge(width w: Int, height h: Int) throws -> Int {
         let longest = max(w,h)
         switch resize {
@@ -238,6 +257,21 @@ public enum Engine {
         let output = uniqueURL(in: directory ?? input.deletingLastPathComponent(), stem: result.url.deletingPathExtension().lastPathComponent, ext: result.url.pathExtension)
         try FileManager.default.copyItem(at: result.url, to: output)
         return output
+    }
+    /// Moves `original` to the Trash and puts the processed file in its place under the original's name
+    /// (with the processed extension). The processed copy is staged first, so a failure leaves the original intact.
+    public static func replaceOriginal(_ original: URL, with result: ConversionResult) throws -> URL {
+        let directory = original.deletingLastPathComponent()
+        let staged = directory.appendingPathComponent(".dice-" + UUID().uuidString + "." + result.url.pathExtension)
+        try FileManager.default.copyItem(at: result.url, to: staged)
+        do { try FileManager.default.trashItem(at: original, resultingItemURL: nil) }
+        catch { try? FileManager.default.removeItem(at: staged); throw DiceError.message("Could not move the original to the Trash: " + error.localizedDescription) }
+        let stem = original.deletingPathExtension().lastPathComponent
+        let ext = result.url.pathExtension
+        let target = uniqueURL(in: directory, stem: stem, ext: ext)
+        do { try FileManager.default.moveItem(at: staged, to: target) }
+        catch { try? FileManager.default.removeItem(at: staged); throw error }
+        return target
     }
     public static func uniqueURL(in directory: URL, stem: String, ext: String) -> URL {
         var candidate = directory.appendingPathComponent(stem + "." + ext); var suffix = 2

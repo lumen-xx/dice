@@ -9,6 +9,8 @@ args = parser.parse_args()
 app = args.app or (pathlib.Path('/Applications/Dice.app') if pathlib.Path('/Applications/Dice.app').exists() else root / 'build/Dice.app')
 if not app.exists(): raise SystemExit('Build Dice first: python3 scripts/package.py')
 info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+if info.get('DiceDevelopmentBuild'):
+    raise SystemExit('Development builds do not register Finder Services.')
 if not any(s.get('NSMessage') == 'editWithDice' for s in info.get('NSServices', [])):
     raise SystemExit('This app has no native Dice Service. Build and install the current app first.')
 workflow = pathlib.Path.home() / 'Library/Services/Edit with Dice.workflow'
