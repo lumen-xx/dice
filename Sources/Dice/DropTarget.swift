@@ -51,10 +51,10 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
     }
     private func show(on screen: NSScreen) {
         if panel == nil {
-            let content = DropTargetView(frame: NSRect(x: 0, y: 0, width: 230, height: 60))
+            let content = DropTargetView(frame: NSRect(x: 0, y: 0, width: 168, height: 168))
             content.onDrop = { [weak self] urls in self?.hide(); self?.onDrop(urls) }
             let p = NSPanel(contentRect: content.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            p.contentView = content; p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true
+            p.contentView = content; p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true; p.invalidateShadow()
             p.level = .statusBar; p.isFloatingPanel = true; p.hidesOnDeactivate = false
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel = p; view = content
@@ -81,24 +81,48 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
 
 final class DropTargetView: NSVisualEffectView {
     var onDrop: ([URL]) -> Void = { _ in }
-    private let label = NSTextField(labelWithString: "Drop to open in Dice")
+    private let title = NSTextField(labelWithString: "Drop to open")
+    private let subtitle = NSTextField(labelWithString: "in Dice")
+    private let icon = NSImageView()
+    private let tint = CALayer()
+    private let dashes = CAShapeLayer()
+    private static let radius: CGFloat = 30
     override init(frame: NSRect) {
         super.init(frame: frame)
-        material = .hudWindow; blendingMode = .behindWindow; state = .active
-        wantsLayer = true; layer?.cornerRadius = 18; layer?.masksToBounds = true; layer?.borderWidth = 1; layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
-        let icon = NSImageView(image: NSImage(systemSymbolName: "die.face.5", accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = .secondaryLabelColor
-        label.font = .systemFont(ofSize: 13, weight: .medium); label.textColor = .labelColor
-        let stack = NSStackView(views: [icon, label]); stack.spacing = 10; stack.translatesAutoresizingMaskIntoConstraints = false
+        material = .popover; blendingMode = .behindWindow; state = .active; appearance = nil
+        wantsLayer = true
+        layer?.cornerRadius = Self.radius; layer?.cornerCurve = .continuous; layer?.masksToBounds = true
+        layer?.borderWidth = 1; layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        tint.backgroundColor = NSColor.clear.cgColor; layer?.addSublayer(tint)
+        dashes.fillColor = nil; dashes.lineWidth = 1.5; dashes.lineDashPattern = [5, 5]; dashes.lineCap = .round
+        dashes.strokeColor = NSColor.white.withAlphaComponent(0.35).cgColor; layer?.addSublayer(dashes)
+        icon.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 34, weight: .light)
+        icon.contentTintColor = .labelColor
+        title.font = .systemFont(ofSize: 14, weight: .semibold); title.textColor = .labelColor
+        subtitle.font = .systemFont(ofSize: 12); subtitle.textColor = .secondaryLabelColor
+        let text = NSStackView(views: [title, subtitle]); text.orientation = .vertical; text.spacing = 1; text.alignment = .centerX
+        let stack = NSStackView(views: [icon, text]); stack.orientation = .vertical; stack.spacing = 10; stack.alignment = .centerX
+        stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: centerXAnchor), stack.centerYAnchor.constraint(equalTo: centerYAnchor)])
         registerForDraggedTypes([.fileURL])
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func layout() {
+        super.layout()
+        tint.frame = bounds
+        dashes.frame = bounds
+        dashes.path = CGPath(roundedRect: bounds.insetBy(dx: 12, dy: 12), cornerWidth: Self.radius - 12, cornerHeight: Self.radius - 12, transform: nil)
+    }
     func highlight(_ on: Bool) {
-        layer?.borderColor = (on ? NSColor.controlAccentColor : NSColor.white.withAlphaComponent(0.12)).cgColor
-        layer?.borderWidth = on ? 2 : 1
-        label.stringValue = on ? "Release to open" : "Drop to open in Dice"
+        let accent = NSColor.controlAccentColor
+        tint.backgroundColor = (on ? accent.withAlphaComponent(0.22) : NSColor.clear).cgColor
+        dashes.strokeColor = (on ? accent : NSColor.white.withAlphaComponent(0.35)).cgColor
+        layer?.borderColor = (on ? accent.withAlphaComponent(0.8) : NSColor.white.withAlphaComponent(0.18)).cgColor
+        icon.contentTintColor = on ? accent : .labelColor
+        icon.image = NSImage(systemSymbolName: on ? "arrow.down.circle.fill" : "square.and.arrow.down", accessibilityDescription: nil)
+        title.stringValue = on ? "Release to open" : "Drop to open"
     }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { highlight(true); return .copy }
     override func draggingExited(_ sender: NSDraggingInfo?) { highlight(false) }
