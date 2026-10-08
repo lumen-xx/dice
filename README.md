@@ -24,7 +24,7 @@ Convert, resize and compress images in a small native window. Inspect all image 
 ![Image list](docs/batch.png)
 ![Settings](docs/settings.png)
 
-## v0.1.8 preview
+## v0.1.9 preview
 
 - Launch from Applications or right-click an image → Edit with Dice. The Dock icon appears while the editor is open and disappears when it closes.
 - Launch opens the drop surface without an automatic file picker. Drag-over lights the full window edge with a soft aurora glow.
@@ -36,7 +36,7 @@ Convert, resize and compress images in a small native window. Inspect all image 
 - Remove personal metadata by default. Metadata-only mode uses ExifTool without recompressing pixels, retaining colour profiles and orientation.
 - Compact summary: dimensions, size, format, camera, capture time and presence of GPS tags.
 - Extensive ExifTool tag viewer: search tags/values, filter by group, select a tag to read its full value, copy values or all tags, and export JSON.
-- Start processes and saves the batch in one action, beside originals or in your optional default export folder, with unique filenames. **⌘,** or the sliders opens Settings inside Dice. **Dice → Save Copies As…** can save another copy or recover output when the source folder is not writable. Originals are preserved. Metadata replaces the image in the same window; the back arrow returns to it.
+- Start processes and saves the batch in one action, beside originals or in your optional default export folder, with unique filenames. **⌘,** opens App settings inside Dice. The sliders opens a separate Image settings popover for the current batch. **Dice → Save Copies As…** can save another copy or recover output when the source folder is not writable. Originals are preserved. Metadata replaces the image in the same window; the back arrow returns to it.
 - App settings include independently enabled default export folder and format preferences, remembered across launches. Format defaults apply when opening a new batch; disabled means Same as original.
 - Check for Updates… downloads signed releases from the public binary-only repository. Include Preview Releases toggles the preview channel; automatic checks can be enabled in Settings and are off by default.
 - Last-used processing settings persist locally. Native horizontal, vertical and diagonal resize cursors indicate the window edges.
@@ -61,7 +61,7 @@ python3 scripts/install-quick-action.py
 
 **Edit with Dice** is a native app Service and appears directly in Finder’s context menu for images, SVGs and PDFs. Enable it in System Settings → Keyboard → Keyboard Shortcuts → Services if macOS leaves it disabled. The legacy-named installer registers the app Service and moves any Dice-generated Automator Quick Action into `build/backups`, avoiding duplicate entries. It refuses to replace an unrecognized workflow. It prefers `/Applications/Dice.app`; use `--app` to select another app location.
 
-The ZIP is written to `build/Dice-v0.1.8-apple-silicon.zip`. The signed application is `build/Dice.app` (also recorded in `build/app-path.txt`). Build outside cloud-synced folders, which can attach Finder metadata that breaks signing. The packaging script enforces an installed size below 40,000,000 bytes.
+The ZIP is written to `build/Dice-v0.1.9-apple-silicon.zip`. The signed application is `build/Dice.app` (also recorded in `build/app-path.txt`). Build outside cloud-synced folders, which can attach Finder metadata that breaks signing. The packaging script enforces an installed size below 40,000,000 bytes.
 
 See the [interface style guide](docs/STYLE_GUIDE.md) and [validation details](docs/VALIDATION.md).
 

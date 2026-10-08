@@ -1,3 +1,9 @@
+# v0.1.9 settings correction — 2026-10-08
+
+Native review verified two separate views: Command-comma opens App settings inside Dice with export defaults and update controls only; the sliders opens an anchored Image settings popover containing conversion, resize, quality and metadata controls. Command-comma from the open popover dismisses it and opens App settings. The release build and deep strict signature verification pass. No processing changes were made; the 20 processing checks from 0.1.8 remain applicable.
+
+---
+
 # v0.1.8 validation — 2026-10-08
 
 The release build compiles, passes deep strict bundle signature verification, and stays below 40 MB: approximately 31.5 MB installed / 10.1 MB zipped. The bundled resvg 0.48.1 renderer runs only on demand; dependency license texts are shipped.

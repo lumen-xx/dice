@@ -9,6 +9,7 @@ struct DiceView: View {
     @ObservedObject var model: DiceModel
     let close: () -> Void
     var checkUpdates: () -> Void = {}
+    @State private var imageSettingsPresented = false
     @State private var metadata = false
     @State private var batch = false
     @State private var batchSearch = ""
@@ -33,8 +34,8 @@ struct DiceView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             if model.settingsPresented {
-                ScrollView { optionsPanel.frame(maxWidth: .infinity) }
-                    .padding(.top, 64).padding(.bottom, model.items.isEmpty ? 16 : 58)
+                ScrollView { appSettingsPanel.frame(maxWidth: .infinity) }
+                    .padding(.top, 64).padding(.bottom, 16)
             } else if batch {
                 BatchPane(model: model, query: $batchSearch) { id in model.selected = id; batch = false }
                     .padding(.top, 64).padding(.bottom, model.items.isEmpty ? 16 : 58)
@@ -57,7 +58,7 @@ struct DiceView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
             }
             toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch || model.settingsPresented ? 56 : 0)
-            if !model.items.isEmpty {
+            if !model.items.isEmpty && !model.settingsPresented {
                 VStack { Spacer(); HStack(spacing: 12) { footerSummary; Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
             }
         }
@@ -93,6 +94,7 @@ struct DiceView: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: targeted)
         .tint(accent)
+        .onChange(of: model.settingsPresented) { if model.settingsPresented { imageSettingsPresented = false } }
         .task(id: "\(model.selected?.uuidString ?? "")|\(previewKey ?? "")") { await loadPreview() }
         .alert("Dice couldn’t finish", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("OK") { model.alert = nil } } message: { Text(model.alert ?? "") }
     }
@@ -102,7 +104,7 @@ struct DiceView: View {
         HStack(spacing: 2) {
             if model.settingsPresented {
                 icon("arrow.left", "Back to image") { model.settingsPresented = false; metadata = false; batch = false }
-                Text("Settings").font(DiceStyle.heading)
+                Text("App settings").font(DiceStyle.heading)
                 Spacer()
             } else if batch {
                 icon("arrow.left", "Back to image") { batch = false }
@@ -118,9 +120,12 @@ struct DiceView: View {
                 icon("plus", "Add images") { model.chooseFiles() }.disabled(model.busy || model.importing)
                 if model.busy || model.importing { ProgressView().controlSize(.mini).padding(.horizontal, 8) }
                 icon("info", "View metadata") { flip() }.disabled(currentInfo == nil || model.items.isEmpty)
-                icon("slider.horizontal.3", "Conversion settings") { model.settingsPresented.toggle() }
+                icon("slider.horizontal.3", "Image settings") { imageSettingsPresented.toggle() }
+                    .popover(isPresented: $imageSettingsPresented, arrowEdge: .top) { imageSettingsPanel }
             }
-            icon("play.fill", "Start with current settings") { model.settingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
+            if !model.settingsPresented {
+            icon("play.fill", "Start with current settings") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
+            }
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 4).padding(.vertical, 3)
@@ -154,7 +159,7 @@ struct DiceView: View {
         Button(action: action) { Image(systemName: symbol).font(DiceStyle.control).frame(width: DiceStyle.controlSize,height: DiceStyle.controlSize).contentShape(Rectangle()) }.help(label).accessibilityLabel(label)
     }
     func flip() { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { metadata.toggle() } }
-    var optionsPanel: some View {
+    var appSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Export defaults").font(DiceStyle.heading)
             Toggle("Default export folder", isOn: $model.preferences.useExportFolder)
@@ -169,6 +174,13 @@ struct DiceView: View {
             }.disabled(!model.preferences.useExportFormat)
             Text("Folder off: save beside originals. Format off: keep the source format. Format defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)
+            Text("Updates").font(DiceStyle.heading)
+            Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
+            Button("Check for updates…") { checkUpdates() }
+        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 380).tint(accent)
+    }
+    var imageSettingsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Image settings").font(DiceStyle.heading)
             Toggle("Metadata only", isOn: $model.options.metadataOnly).font(DiceStyle.caption)
             if !model.options.metadataOnly {
@@ -183,18 +195,15 @@ struct DiceView: View {
             Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly)
             Text(model.options.metadataOnly ? "Pixels stay unchanged. Colour and orientation are retained." : "Copies save automatically. SVG/PDF become PNG by default; PDF renders at 144 dpi. No upscaling.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Resize all") { model.settingsPresented = false; model.process(resizeOnly: true) }
+                Button("Resize all") { imageSettingsPresented = false; model.process(resizeOnly: true) }
                     .disabled(model.busy || model.importing || model.items.isEmpty || model.options.resize == .original)
                     .help("Change resolution only; preserve metadata and skip images already within the target size")
                 Spacer()
-                Button("Start") { model.settingsPresented = false; model.process() }.buttonStyle(.borderedProminent).disabled(model.busy || model.importing || model.items.isEmpty)
+                Button("Start") { imageSettingsPresented = false; model.process() }.buttonStyle(.borderedProminent).disabled(model.busy || model.importing || model.items.isEmpty)
             }
             Text("Resize all keeps the source format and metadata, skipping smaller images. Vector/RAW inputs become PNG copies.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Divider().padding(.vertical, 4)
-            Text("Updates").font(DiceStyle.heading)
-            Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
-            Button("Check for updates…") { checkUpdates() }
-        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 380).tint(accent)
+        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 340).tint(accent)
+            .disabled(model.busy || model.importing)
     }
     func number(_ binding: Binding<Int>) -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel("Resize value") }
     func loadPreview() async {
