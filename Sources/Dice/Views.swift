@@ -253,9 +253,9 @@ struct DiceView: View {
             Text("General").font(DiceStyle.heading)
             Toggle("Start at login", isOn: $model.preferences.startAtLogin)
             Toggle("Show in menu bar", isOn: $model.preferences.showInMenuBar)
-            Toggle("Drop images on the menu bar icon", isOn: $model.preferences.menuBarDrop).disabled(!model.preferences.showInMenuBar)
+            if model.preferences.showInMenuBar { Toggle("Drop images on the menu bar icon", isOn: $model.preferences.menuBarDrop).padding(.leading, 20) }
             Picker("Drag files to reveal a drop target", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }
-            Toggle("Start right after a drop", isOn: $model.preferences.dropStartsImmediately).disabled(!(model.preferences.showInMenuBar && model.preferences.menuBarDrop) && model.preferences.dragTarget == .off)
+            if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off { Toggle("Start right after a drop", isOn: $model.preferences.dropStartsImmediately) }
             Toggle("Stay on top of other apps", isOn: $model.preferences.stayOnTop)
             Divider().padding(.vertical, 4)
             Text("Updates").font(DiceStyle.heading)

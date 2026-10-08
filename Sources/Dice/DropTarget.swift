@@ -1,7 +1,7 @@
 import AppKit
 
 enum DragTarget: String, Codable, CaseIterable, Identifiable {
-    case off = "Off", notch = "Top center (notch)"
+    case off = "Off", bottomLeft = "Bottom left corner", bottomRight = "Bottom right corner"
     var id: String { rawValue }
 }
 
@@ -45,7 +45,8 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
     private func inZone(_ p: NSPoint, _ f: NSRect) -> Bool {
         switch target {
         case .off: return false
-        case .notch: return abs(p.x - f.midX) < 170 && p.y > f.maxY - 44
+        case .bottomLeft: return p.x < f.minX + 150 && p.y < f.minY + 150
+        case .bottomRight: return p.x > f.maxX - 150 && p.y < f.minY + 150
         }
     }
     private func show(on screen: NSScreen) {
@@ -62,7 +63,8 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
         let f = screen.frame, v = screen.visibleFrame, size = panel.frame.size
         let origin: NSPoint
         switch target {
-        case .notch, .off: origin = NSPoint(x: f.midX - size.width / 2, y: v.maxY - size.height - 6)
+        case .bottomLeft, .off: origin = NSPoint(x: f.minX + 14, y: v.minY + 14)
+        case .bottomRight: origin = NSPoint(x: f.maxX - size.width - 14, y: v.minY + 14)
         }
         panel.setFrameOrigin(origin)
         if !panel.isVisible {
