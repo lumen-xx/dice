@@ -22,7 +22,7 @@ struct DiceView: View {
         ZStack(alignment: .topTrailing) {
             if batch {
                 BatchPane(model: model, query: $batchSearch) { id in model.selected = id; batch = false }
-                    .padding(.top, 52).padding(.bottom, model.items.isEmpty ? 16 : 52)
+                    .padding(.top, 64).padding(.bottom, model.items.isEmpty ? 16 : 58)
             } else if model.items.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "die.face.5").font(DiceStyle.emptySymbol).foregroundStyle(.secondary)
@@ -30,7 +30,7 @@ struct DiceView: View {
                     Text("or drop them here").font(DiceStyle.caption).foregroundStyle(.tertiary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if metadata {
-                MetadataPane(info: inspected).id(model.selected).padding(.top, 54).padding(.bottom, 52)
+                MetadataPane(info: inspected).id(model.selected).padding(.top, 64).padding(.bottom, 58)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
@@ -43,7 +43,7 @@ struct DiceView: View {
             }
             toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch ? 56 : 0)
             if !model.items.isEmpty {
-                VStack { Spacer(); HStack { Spacer(); pager }.padding(DiceStyle.inset) }
+                VStack { Spacer(); HStack(spacing: 12) { footerSummary; Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
             }
         }
         .font(DiceStyle.body)
@@ -110,6 +110,20 @@ struct DiceView: View {
         .background { if !metadata && !batch { Capsule().fill(.ultraThinMaterial) } }
         .overlay { if !metadata && !batch { Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5) } }
         .frame(maxWidth: metadata || batch ? .infinity : nil)
+    }
+    @ViewBuilder var footerSummary: some View {
+        if batch {
+            let count = model.items.filter { ImageSearch.matches(batchSearch, text: $0.searchText) }.count
+            Text("\(count) of \(model.items.count) images").font(DiceStyle.caption).foregroundStyle(.secondary)
+        } else if let info = inspected {
+            HStack(spacing: 6) {
+                Text("\(info.width) × \(info.height) · \(info.value("FileType") ?? "Image") · \(bytes(info.bytes))")
+                if metadata {
+                    Text("· \(info.rows.count) tags")
+                    if info.hasGPS { Image(systemName: "location.fill").help("GPS metadata found") }
+                }
+            }.font(DiceStyle.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
     }
     var pager: some View {
         HStack(spacing: 0) {
@@ -201,7 +215,6 @@ struct BatchPane: View {
                     }
                 }
             }
-            HStack { Text("\(filtered.count) of \(model.items.count) images").font(DiceStyle.caption).foregroundStyle(.secondary); Spacer() }
         }.padding(.horizontal, 16)
     }
 }

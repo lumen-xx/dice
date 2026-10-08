@@ -19,18 +19,6 @@ struct MetadataPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let info {
-                HStack(spacing: 6) {
-                    Text("\(info.width) × \(info.height)").monospacedDigit()
-                    Text("·")
-                    Text(info.value("FileType") ?? "Image")
-                    Text("·")
-                    Text(bytes(info.bytes))
-                    Spacer()
-                    if info.hasGPS { Image(systemName: "location.fill").help("GPS metadata found") }
-                    Text("\(rows.count) tags")
-                }.font(DiceStyle.caption).foregroundStyle(.secondary)
-            }
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -77,8 +65,14 @@ struct MetadataPane: View {
         }.padding(.horizontal, DiceStyle.inset)
     }
 
+    private func copy(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
     private func tag(_ row: MetadataRow, labelWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
             Button {
                 selected = selected == row.id ? nil : row.id
             } label: {
@@ -91,6 +85,12 @@ struct MetadataPane: View {
             }.buttonStyle(.plain).help("\(row.name): \(row.value)")
                 .accessibilityLabel("\(row.name), \(row.value)")
                 .accessibilityHint("Show or hide the full value")
+            Button { copy(row.value) } label: {
+                Image(systemName: "doc.on.doc").font(DiceStyle.caption)
+                    .foregroundStyle(.secondary).frame(width: DiceStyle.controlSize, height: DiceStyle.controlSize)
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain).help("Copy value").accessibilityLabel("Copy \(row.name) value")
+            }
             if selected == row.id {
                 Text(row.value).font(DiceStyle.data).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,8 +101,7 @@ struct MetadataPane: View {
         .overlay(alignment: .bottom) { Rectangle().fill(.primary.opacity(0.045)).frame(height: 0.5).padding(.horizontal, 8) }
         .contextMenu {
             Button("Copy value") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(row.value, forType: .string)
+                copy(row.value)
             }
         }
     }

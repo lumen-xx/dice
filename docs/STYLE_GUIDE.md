@@ -40,3 +40,5 @@ Use restrained transitions and honour Reduce Motion. Avoid idle animation. Searc
 Launching from Finder or Applications reveals the drop surface. Only an explicit Choose images or Add action opens the file picker; opening image files imports them directly.
 
 The metadata view uses an unboxed navigation header and flat name/value rows. Show each group name once as a quiet section label. Search has a single subtle background; the group filter stays neutral. Select a row to reveal its full, selectable value in place. Avoid table chrome and alternating filled rows.
+
+Search begins 12 points below the navigation header. The shared footer aligns image counts or resolution/format/size on the left with paging on the right. Metadata rows have a trailing copy-value button with a 30-point target.

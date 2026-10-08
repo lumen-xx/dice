@@ -2,7 +2,11 @@ import SwiftUI
 import AppKit
 
 @main struct DiceApp {
-    @MainActor static func main() {
+    static func main() {
+        // AppKit owns the run loop; don't hold a Swift main-actor job across app.run().
+        MainActor.assumeIsolated { run() }
+    }
+    @MainActor private static func run() {
         let app = NSApplication.shared
         let delegate = DiceDelegate()
         app.delegate = delegate

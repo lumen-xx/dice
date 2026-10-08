@@ -1,3 +1,13 @@
+# v0.1.7 validation — 2026-10-08
+
+Release build and deep strict bundle signature verification pass. Size: 26.23 MB installed / 7.80 MB zipped. All 11 processing/search checks pass.
+
+Fresh native development launch imports the generated image promptly after moving the AppKit run loop out of the Swift main-actor entry job. Native checks verified header/search spacing, trailing per-row copy controls, metadata details in the bottom-left footer, and the batch count aligned with paging. Clicking Copy ImageSize placed `512x512` on the clipboard. README screenshots use generated demo content only.
+
+Public GitHub updates installed both 0.1.6 and 0.1.7. For 0.1.7, native download/ready-to-install UI was checked; after session protection and close, the installed bundle became 0.1.7/build 8, passed deep strict signature verification and reopened to the drop surface. The public GitHub update completed: `/Applications/Dice.app` changed from 0.1.5/build 6 to 0.1.6/build 7, and the running app reopened with an image. The earlier local signed installation/relaunch test is recorded below.
+
+---
+
 # v0.1.6 updater validation — 2026-10-08
 
 Sparkle 2.10.0 is pinned in SwiftPM and bundled with its license. The packaged app passes deep, strict signature verification and remains below the 40 MB budget: approximately 26.2 MB installed / 7.8 MB zipped. All 11 processing/search checks pass.
@@ -6,7 +16,7 @@ The signed archive and signed feed verify against the Dice Keychain key. Modifie
 
 A native local update test installed build 6 over build 5 and relaunched at the original app path. Server logs confirmed feed/archive requests; the installed Info.plist changed to 0.1.5/build 6, and the subsequent check reported that version up to date. The public release feed and archive are published; GitHub’s raw feed can lag while its CDN refreshes.
 
-Checks are manual by default. The updater postpones relaunch if image processing/import or unsaved processed copies remain. That session-protection branch is code-reviewed but was not exercised in the native update test. Initial browser-download Gatekeeper approval and cross-machine compatibility remain to be validated; update signatures do not notarize Dice itself.
+Checks are manual by default. The updater postpones relaunch if image processing/import or unsaved processed copies remain. The unsaved-results branch was subsequently exercised during the public 0.1.7 update: relaunch was held until the result was backed up and the editor closed. Initial browser-download Gatekeeper approval and cross-machine compatibility remain to be validated; update signatures do not notarize Dice itself.
 
 ---
 
