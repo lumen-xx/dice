@@ -42,6 +42,7 @@ final class DiceWindow: NSWindow {
     lazy var updates = DiceUpdates(model: model)
     var window: NSWindow?
     var statusItem: NSStatusItem?
+    var statusMenu: NSMenu?
     var preferenceObserver: AnyCancellable?
     var isDevelopmentBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool == true }
     func applyPreferences(_ p: AppPreferences) {
@@ -54,7 +55,9 @@ final class DiceWindow: NSWindow {
             let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ""); settings.target = self; menu.addItem(settings)
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit Dice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
-            item.menu = menu; statusItem = item
+            statusMenu = menu; statusItem = item
+            item.button?.target = self; item.button?.action = #selector(statusItemClicked(_:))
+            item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         } else if !p.showInMenuBar, let item = statusItem {
             NSStatusBar.system.removeStatusItem(item); statusItem = nil
         }
@@ -62,6 +65,14 @@ final class DiceWindow: NSWindow {
         let service = SMAppService.mainApp
         if p.startAtLogin, service.status != .enabled { try? service.register() }
         else if !p.startAtLogin, service.status == .enabled { try? service.unregister() }
+    }
+    /// Left click opens Dice right away; right click (or control-click) shows the menu.
+    @objc func statusItemClicked(_ sender: Any?) {
+        guard let event = NSApp.currentEvent else { showWindow(); return }
+        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+            guard let item = statusItem, let menu = statusMenu else { return }
+            item.menu = menu; item.button?.performClick(nil); item.menu = nil
+        } else { showWindow() }
     }
     @objc func openFromMenu(_ sender: Any?) { showWindow() }
     /// Close the window once a run finishes; quit unless the menu bar item keeps Dice available.
