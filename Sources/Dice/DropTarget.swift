@@ -63,8 +63,6 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
         let origin: NSPoint
         switch target {
         case .notch, .off: origin = NSPoint(x: f.midX - size.width / 2, y: v.maxY - size.height - 6)
-        case .topRight: origin = NSPoint(x: f.maxX - size.width - 14, y: v.maxY - size.height - 6)
-        case .bottomRight: origin = NSPoint(x: f.maxX - size.width - 14, y: v.minY + 14)
         }
         panel.setFrameOrigin(origin)
         if !panel.isVisible {
