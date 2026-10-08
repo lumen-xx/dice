@@ -50,8 +50,14 @@ struct DiceView: View {
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
-                    if let preview = displayedPreview {
+                    if model.busy {
+                        VStack(spacing: 14) {
+                            ProgressView().controlSize(.large)
+                            Text(model.status).font(DiceStyle.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let preview = displayedPreview {
                         Image(nsImage: preview).resizable().scaledToFit().padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
+                            .contextMenu { if let id = model.selected { removalMenu(id) } }
                     } else if let error = previewError {
                         Text(error).font(DiceStyle.caption).foregroundStyle(.secondary).padding(30)
                     } else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -159,6 +165,10 @@ struct DiceView: View {
         Button(action: action) { Image(systemName: symbol).font(DiceStyle.control).frame(width: DiceStyle.controlSize,height: DiceStyle.controlSize).contentShape(Rectangle()) }.help(label).accessibilityLabel(label)
     }
     func flip() { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { metadata.toggle() } }
+    @ViewBuilder func removalMenu(_ id: UUID) -> some View {
+        Button("Remove from Dice") { model.remove(id) }.disabled(model.busy || model.importing)
+        Button("Move Original to Trash") { model.trashOriginal(id) }.disabled(model.busy || model.importing)
+    }
     var appSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Export defaults").font(DiceStyle.heading)
@@ -172,7 +182,16 @@ struct DiceView: View {
             Picker("Default format", selection: $model.preferences.exportFormat) {
                 ForEach(OutputFormat.allCases.filter { $0 != .original }) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) }
             }.disabled(!model.preferences.useExportFormat)
+            Picker("Default resize", selection: $model.preferences.defaultResize) { ForEach(ResizeMode.allCases.filter { $0 != .fit }) { Text($0.rawValue).tag($0) } }
+            if model.preferences.defaultResize == .edge { HStack { Text("Longest edge"); number($model.preferences.defaultEdge); Text("px") } }
+            if model.preferences.defaultResize == .percent { HStack { Text("Scale"); number($model.preferences.defaultPercent); Text("%") } }
+            HStack { Text("Default quality"); Slider(value: $model.preferences.defaultQuality, in: 0.1...1); Text("\(Int(model.preferences.defaultQuality * 100))%").monospacedDigit() }
             Text("Defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 4)
+            Text("General").font(DiceStyle.heading)
+            Toggle("Start at login", isOn: $model.preferences.startAtLogin)
+            Toggle("Show in menu bar", isOn: $model.preferences.showInMenuBar)
+            Toggle("Stay on top of other apps", isOn: $model.preferences.stayOnTop)
             Divider().padding(.vertical, 4)
             Text("Updates").font(DiceStyle.heading)
             Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
@@ -268,7 +287,8 @@ struct BatchPane: View {
                                     }.contentShape(Rectangle())
                                 }.buttonStyle(.plain).help("Open \(item.name)")
                                 Button { model.remove(item.id) } label: { Image(systemName: "xmark").font(DiceStyle.caption).frame(width: 22,height: 26) }.buttonStyle(.plain).help("Remove from Dice; original stays in place").accessibilityLabel("Remove \(item.name)").disabled(model.busy || model.importing)
-                            }.padding(8).background(item.id == model.selected ? accent.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                            }.contextMenu { Button("Remove from Dice") { model.remove(item.id) }.disabled(model.busy || model.importing); Button("Move Original to Trash") { model.trashOriginal(item.id) }.disabled(model.busy || model.importing) }
+                            .padding(8).background(item.id == model.selected ? accent.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
                         }
                     }
                 }

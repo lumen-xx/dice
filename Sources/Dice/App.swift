@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import Combine
+import ServiceManagement
 
 @main struct DiceApp {
     static func main() {
@@ -39,7 +41,41 @@ final class DiceWindow: NSWindow {
     let model = DiceModel()
     lazy var updates = DiceUpdates(model: model)
     var window: NSWindow?
-    func applicationDidFinishLaunching(_ notification: Notification) { if Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool != true { NSApp.servicesProvider = self; NSUpdateDynamicServices() }; updates.start(); showWindow() }
+    var statusItem: NSStatusItem?
+    var preferenceObserver: AnyCancellable?
+    var isDevelopmentBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool == true }
+    func applyPreferences(_ p: AppPreferences) {
+        window?.level = p.stayOnTop ? .floating : .normal
+        if p.showInMenuBar, statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = NSImage(systemSymbolName: "die.face.5", accessibilityDescription: "Dice")
+            let menu = NSMenu()
+            let open = NSMenuItem(title: "Open Dice", action: #selector(openFromMenu(_:)), keyEquivalent: ""); open.target = self; menu.addItem(open)
+            let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ""); settings.target = self; menu.addItem(settings)
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Quit Dice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+            item.menu = menu; statusItem = item
+        } else if !p.showInMenuBar, let item = statusItem {
+            NSStatusBar.system.removeStatusItem(item); statusItem = nil
+        }
+        guard !isDevelopmentBuild else { return }
+        let service = SMAppService.mainApp
+        if p.startAtLogin, service.status != .enabled { try? service.register() }
+        else if !p.startAtLogin, service.status == .enabled { try? service.unregister() }
+    }
+    @objc func openFromMenu(_ sender: Any?) { showWindow() }
+    /// Close the window once a run finishes; quit unless the menu bar item keeps Dice available.
+    func finishRun() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [self] in
+            window?.close()
+            if !model.preferences.showInMenuBar { NSApp.terminate(nil) }
+        }
+    }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        model.onFinished = { [weak self] in self?.finishRun() }
+        applyPreferences(model.preferences)
+        preferenceObserver = model.$preferences.removeDuplicates().sink { [weak self] p in self?.applyPreferences(p) }
+        if Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool != true { NSApp.servicesProvider = self; NSUpdateDynamicServices() }; updates.start(); showWindow() }
     @objc func showSettings(_ sender: Any?) { showWindow(); model.settingsPresented = true }
     @objc func saveCopies(_ sender: Any?) { model.save() }
     @objc func checkForUpdates(_ sender: Any?) { showWindow(); updates.check(sender) }
@@ -54,7 +90,7 @@ final class DiceWindow: NSWindow {
             w.title = "Dice"; w.hasShadow = true
             w.isReleasedWhenClosed = false; w.isOpaque = false; w.backgroundColor = .clear
             w.isMovableByWindowBackground = true; w.delegate = self
-            w.collectionBehavior.insert(.fullScreenNone)
+            w.collectionBehavior.insert(.fullScreenNone); w.level = model.preferences.stayOnTop ? .floating : .normal
             let effect = NSVisualEffectView(); effect.material = .hudWindow; effect.blendingMode = .behindWindow; effect.state = .active
             effect.wantsLayer = true; effect.layer?.cornerRadius = DiceStyle.cornerRadius; effect.layer?.masksToBounds = true
             let hosting = DiceHostingView(rootView: DiceView(model: model, close: { [weak w] in w?.close() }, checkUpdates: { [weak self] in self?.updates.check(nil) })); hosting.translatesAutoresizingMaskIntoConstraints = false

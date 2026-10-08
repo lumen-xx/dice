@@ -37,6 +37,8 @@ struct ImageItem: Identifiable {
     @Published var status = "All processing stays on this Mac"
     @Published var alert: String?
     @Published var completed = 0
+    /// Called when a run finishes with every image processed and saved.
+    var onFinished: (() -> Void)?
     private var cancelRequested = false
     private var closeRequested = false
     let previewCache = PreviewCache()
@@ -70,7 +72,13 @@ struct ImageItem: Identifiable {
         let accepted = Array(Set(urls.filter { $0.isFileURL })).sorted { $0.path < $1.path }
         let fresh = accepted.filter { url in !items.contains(where: { $0.url == url }) }
         guard !fresh.isEmpty else { return }
-        if items.isEmpty { options.format = preferences.useExportFormat ? preferences.exportFormat : .original }
+        if items.isEmpty {
+            options.format = preferences.useExportFormat ? preferences.exportFormat : .original
+            options.quality = preferences.defaultQuality
+            options.resize = preferences.defaultResize
+            options.edge = preferences.defaultEdge
+            options.percent = preferences.defaultPercent
+        }
         closeRequested = false
         importing = true
         let cache = previewCache
@@ -113,6 +121,15 @@ struct ImageItem: Identifiable {
         let removedIndex = items.firstIndex { $0.id == id } ?? 0
         items.removeAll { $0.id == id }
         if selected == id { selected = items.isEmpty ? nil : items[min(removedIndex, items.count - 1)].id }
+    }
+    func trashOriginal(_ id: UUID) {
+        guard !busy, !importing, let item = items.first(where: { $0.id == id }) else { return }
+        let others = items.contains { $0.id != id && $0.url == item.url }
+        do {
+            if !others { try FileManager.default.trashItem(at: item.url, resultingItemURL: nil) }
+            remove(id)
+            status = "Moved \(item.url.lastPathComponent) to the Trash"
+        } catch { alert = error.localizedDescription }
     }
     func clear() {
         guard !busy, !importing else { return }
@@ -172,6 +189,7 @@ struct ImageItem: Identifiable {
             if closeRequested { clear(); return }
             status = cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
+            else if !cancelRequested { onFinished?() }
         }
     }
     func cancel() { cancelRequested = true; status = "Finishing the current image…" }
