@@ -17,6 +17,11 @@ struct AppPreferences: Codable, Equatable {
     var defaultReplaceOriginals = false
     var defaultStripMetadata = true
     var alwaysStripMetadata = false
+    var flattenColor: [Double] = [1, 1, 1]
+    var keepAnimation = true
+    var framesAsFolder = true
+    var fileSuffix = "-dice"
+    var closeWhenDone = true
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -36,5 +41,10 @@ struct AppPreferences: Codable, Equatable {
         defaultReplaceOriginals = try c.decodeIfPresent(Bool.self, forKey: .defaultReplaceOriginals) ?? d.defaultReplaceOriginals
         defaultStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .defaultStripMetadata) ?? d.defaultStripMetadata
         alwaysStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .alwaysStripMetadata) ?? d.alwaysStripMetadata
+        flattenColor = try c.decodeIfPresent([Double].self, forKey: .flattenColor) ?? d.flattenColor
+        keepAnimation = try c.decodeIfPresent(Bool.self, forKey: .keepAnimation) ?? d.keepAnimation
+        framesAsFolder = try c.decodeIfPresent(Bool.self, forKey: .framesAsFolder) ?? d.framesAsFolder
+        fileSuffix = try c.decodeIfPresent(String.self, forKey: .fileSuffix) ?? d.fileSuffix
+        closeWhenDone = try c.decodeIfPresent(Bool.self, forKey: .closeWhenDone) ?? d.closeWhenDone
     }
 }

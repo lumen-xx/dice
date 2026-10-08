@@ -11,13 +11,13 @@ struct ImageItem: Identifiable {
     var page = 1
     var name: String {
         if url.pathExtension.lowercased() == "pdf" { return "\(url.lastPathComponent) · Page \(page)" }
-        if (info?.frames ?? 1) > 1 { return "\(url.lastPathComponent) · \(info?.type == UTType.tiff.identifier ? "Page" : "Frame") \(page)" }
+        if (info?.frames ?? 1) > 1 { return info?.type == UTType.tiff.identifier ? "\(url.lastPathComponent) · Page \(page)" : "\(url.lastPathComponent) · \(info?.frames ?? 1) frames" }
         return url.lastPathComponent
     }
     var info: ImageInfo?
     var error: String?
     var previewGeneration = UUID()
-    var previewCacheKey: String { result.map { PreviewCache.key($0.url) + "|" + previewGeneration.uuidString } ?? PreviewCache.key(url, page: page) }
+    var previewCacheKey: String { result.map { PreviewCache.key($0.previewURL ?? $0.url) + "|" + previewGeneration.uuidString } ?? PreviewCache.key(url, page: page) }
     var savedURL: URL?
     var result: ConversionResult?
     var thumbnail: NSImage?
@@ -150,6 +150,11 @@ struct ImageItem: Identifiable {
         let exportDirectory = preferences.useExportFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
         var snapshot = options
         if preferences.alwaysStripMetadata { snapshot.stripMetadata = true }
+        snapshot.flattenColor = preferences.flattenColor
+        snapshot.keepAnimation = preferences.keepAnimation
+        snapshot.framesAsFolder = preferences.framesAsFolder
+        let suffix = preferences.fileSuffix.filter { !"/:\\".contains($0) }
+        snapshot.fileSuffix = suffix
         let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly && !preferences.alwaysStripMetadata
         busy = true; cancelRequested = false; completed = 0
         for i in items.indices {
@@ -180,7 +185,7 @@ struct ImageItem: Identifiable {
                         if replace { replacedHere = true; previewCache.remove(PreviewCache.key(input, page: page)); items[index].url = url; replaced += 1 }
                     case .failure(let error): items[index].error = (replace ? "Processed, but could not replace the original: " : "Processed, but could not save the copy: ") + error.localizedDescription + (replace ? "" : " Use Dice → Save Copies As… to choose another folder.")
                     }
-                    let info = await Task.detached { try? Engine.inspect(output.url) }.value
+                    let info = await Task.detached { try? Engine.inspect(output.previewURL ?? output.url) }.value
                     items[index].resultInfo = info
                     if replacedHere, let info { items[index].info = info }
                 case .failure(let error): items[index].error = error.localizedDescription
@@ -204,7 +209,8 @@ struct ImageItem: Identifiable {
                 panel.directoryURL = item.url.deletingLastPathComponent()
                 guard panel.runModal() == .OK, let output = panel.url else { return }
                 guard output.standardizedFileURL != item.url.standardizedFileURL else { throw DiceError.message("Choose a different filename to preserve the original.") }
-                try Data(contentsOf: result.url).write(to: output, options: .atomic)
+                if FileManager.default.fileExists(atPath: output.path) { try FileManager.default.trashItem(at: output, resultingItemURL: nil) }
+                try FileManager.default.copyItem(at: result.url, to: output)
                 if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].savedURL = output }
                 status = "Saved a copy"
             } else {

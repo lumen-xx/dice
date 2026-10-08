@@ -19,7 +19,7 @@ struct DiceView: View {
     @State private var inspected: ImageInfo?
     @State private var previewError: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var displayedURL: URL? { model.selection?.result?.url ?? model.selection?.url }
+    var displayedURL: URL? { model.selection?.result.map { $0.previewURL ?? $0.url } ?? model.selection?.url }
     var previewKey: String? { model.selection?.previewCacheKey }
     var displayedPreview: NSImage? {
         guard let key = previewKey else { return nil }
@@ -100,6 +100,10 @@ struct DiceView: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: targeted)
         .tint(accent)
+        .background(SwipeCatcher { direction in
+            guard !model.settingsPresented, !batch, !metadata, !model.busy, model.items.count > 1 else { return }
+            step(direction)
+        })
         .onChange(of: model.settingsPresented) { if model.settingsPresented { imageSettingsPresented = false } }
         .task(id: "\(model.selected?.uuidString ?? "")|\(previewKey ?? "")") { await loadPreview() }
         .alert("Dice couldn’t finish", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("OK") { model.alert = nil } } message: { Text(model.alert ?? "") }
@@ -168,6 +172,11 @@ struct DiceView: View {
     @ViewBuilder func removalMenu(_ id: UUID) -> some View {
         Button("Remove from Dice") { model.remove(id) }.disabled(model.busy || model.importing)
         Button("Move Original to Trash") { model.trashOriginal(id) }.disabled(model.busy || model.importing)
+        if let item = model.items.first(where: { $0.id == id }) { Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.savedURL ?? item.url]) } }
+    }
+    var flattenColor: Binding<Color> {
+        Binding(get: { let c = model.preferences.flattenColor + [1, 1, 1]; return Color(.sRGB, red: c[0], green: c[1], blue: c[2]) },
+                set: { if let c = NSColor($0).usingColorSpace(.sRGB) { model.preferences.flattenColor = [Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent)] } })
     }
     var appSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -190,6 +199,20 @@ struct DiceView: View {
             HStack(spacing: 6) { Toggle("Always remove personal metadata", isOn: $model.preferences.alwaysStripMetadata); InfoTip("Removes metadata from every export and hides the option in image settings"); Spacer(minLength: 0) }
             HStack(spacing: 6) { Toggle("Replace originals by default", isOn: $model.preferences.defaultReplaceOriginals); InfoTip("Original goes to the Trash; PDFs, SVGs and multi-frame files are always saved as copies"); Spacer(minLength: 0) }
             Text("Defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 4)
+            Text("Output").font(DiceStyle.heading)
+            HStack(spacing: 6) {
+                ColorPicker("Fill transparency with", selection: flattenColor, supportsOpacity: false)
+                InfoTip("Used when an image with transparency is saved as JPEG or BMP, which have no alpha channel.")
+                Text(Engine.hex(model.preferences.flattenColor)).font(DiceStyle.caption).foregroundStyle(.secondary).monospacedDigit()
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 6) { Toggle("Keep animation when saving GIF", isOn: $model.preferences.keepAnimation); InfoTip("Animated GIFs stay animated when exported as GIF. Animated WebP and other animations can be read, but only GIF is written as an animation."); Spacer(minLength: 0) }
+            Picker("Animated to other formats", selection: $model.preferences.framesAsFolder) {
+                Text("Folder of frames").tag(true); Text("First frame only").tag(false)
+            }
+            HStack { Text("Filename suffix"); TextField("none", text: $model.preferences.fileSuffix).textFieldStyle(.roundedBorder).frame(width: 110); Spacer(minLength: 0) }
+            Toggle("Close Dice when finished", isOn: $model.preferences.closeWhenDone)
             Divider().padding(.vertical, 4)
             Text("General").font(DiceStyle.heading)
             Toggle("Start at login", isOn: $model.preferences.startAtLogin)
@@ -319,5 +342,34 @@ struct InfoTip: View {
                 Text(text).font(DiceStyle.caption).fixedSize(horizontal: false, vertical: true).frame(width: 220, alignment: .leading).padding(10)
             }
             .accessibilityLabel("More information").accessibilityHint(text)
+    }
+}
+
+/// Turns two-finger horizontal trackpad swipes over the window into previous/next steps.
+struct SwipeCatcher: NSViewRepresentable {
+    let onSwipe: (Int) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSView { let view = NSView(); context.coordinator.view = view; context.coordinator.start(); return view }
+    func updateNSView(_ view: NSView, context: Context) { context.coordinator.onSwipe = onSwipe }
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.stop() }
+    final class Coordinator {
+        weak var view: NSView?
+        var onSwipe: (Int) -> Void = { _ in }
+        private var monitor: Any?
+        private var travelled: CGFloat = 0
+        private var fired = false
+        func start() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in self?.handle(event); return event }
+        }
+        func stop() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
+        private func handle(_ event: NSEvent) {
+            guard event.hasPreciseScrollingDeltas, event.momentumPhase == [], let window = view?.window, event.window === window else { return }
+            if event.phase == .began || event.phase == .mayBegin { travelled = 0; fired = false }
+            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return }
+            // Fingers moving left → next image, whichever way the scrolling direction is set.
+            travelled += event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+            if !fired && abs(travelled) > 70 { fired = true; onSwipe(travelled < 0 ? 1 : -1) }
+            if event.phase == .ended || event.phase == .cancelled { travelled = 0; fired = false }
+        }
     }
 }

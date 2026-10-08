@@ -230,7 +230,7 @@ final class EngineTests {
         try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='red'/></svg>".utf8).write(to: red)
         try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='blue'/></svg>".utf8).write(to: blue)
         let images = [try Engine.previewImage(red, maxPixelSize: 80), try Engine.previewImage(blue, maxPixelSize: 80)]
-        for format in [OutputFormat.gif, .tiff] {
+        for format in [OutputFormat.tiff] {
             let input = directory.appendingPathComponent("multiple." + format.ext)
             let dest = CGImageDestinationCreateWithURL(input as CFURL, format.type as CFString, 2, nil)!
             for image in images { CGImageDestinationAddImage(dest, image, nil) }
@@ -243,6 +243,39 @@ final class EngineTests {
             XCTAssertTrue(rgba(try Engine.previewImage(second.url, maxPixelSize: 80), x: 20, y: 20)[2] > 240)
             XCTAssertFalse(first.url == second.url)
         }
+    }
+    func testAnimatedGIFAndTransparencyFill() throws {
+        let red = directory.appendingPathComponent("a.svg"), blue = directory.appendingPathComponent("b.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='red'/></svg>".utf8).write(to: red)
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='blue'/></svg>".utf8).write(to: blue)
+        let images = [try Engine.previewImage(red, maxPixelSize: 80), try Engine.previewImage(blue, maxPixelSize: 80)]
+        let input = directory.appendingPathComponent("anim.gif")
+        let dest = CGImageDestinationCreateWithURL(input as CFURL, UTType.gif.identifier as CFString, 2, nil)!
+        for image in images { CGImageDestinationAddImage(dest, image, nil) }
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        XCTAssertEqual(try Engine.pageCount(input), 1)
+        var options = Options(); options.format = .gif
+        let kept = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertEqual(CGImageSourceGetCount(CGImageSourceCreateWithURL(kept.url as CFURL, nil)!), 2)
+        options.format = .png
+        let folder = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertTrue(folder.isFolder)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.url.path).sorted(), ["frame-0001.png", "frame-0002.png"])
+        XCTAssertTrue(rgba(try Engine.previewImage(folder.previewURL!, maxPixelSize: 80), x: 20, y: 20)[0] > 240)
+        let copy = try Engine.saveCopy(folder, beside: input)
+        XCTAssertTrue(copy.lastPathComponent.hasPrefix("anim-frames-dice") && !copy.lastPathComponent.contains("."))
+        options.framesAsFolder = false
+        let first = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertFalse(first.isFolder)
+        // Transparent pixels take the chosen fill colour in formats without alpha.
+        let clear = directory.appendingPathComponent("clear.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'></svg>".utf8).write(to: clear)
+        options = Options(); options.format = .jpeg; options.flattenColor = [0, 1, 0]
+        let jpeg = try Engine.convert(clear, options: options, directory: directory)
+        let pixel = rgba(try Engine.previewImage(jpeg.url, maxPixelSize: 40), x: 20, y: 20)
+        XCTAssertTrue(pixel[1] > 200 && pixel[0] < 60 && pixel[2] < 60)
+        options.fileSuffix = "-small"
+        XCTAssertTrue(try Engine.convert(clear, options: options, directory: directory).url.lastPathComponent.contains("-small"))
     }
     func testResizeOnlySkipsSmallAndPreservesMetadata() throws {
         let input = try fixture(format: UTType.png.identifier)
@@ -345,6 +378,7 @@ final class EngineTests {
             ("PDF pages, dimensions and rotation", suite.testPDFAllPagesAndRotation),
             ("GIF, BMP, TIFF and AVIF round trips", suite.testAdditionalStillFormats),
             ("GIF and TIFF frame extraction", suite.testGIFAndTIFFFrameExtraction),
+            ("Animated GIF, frame folders and transparency fill", suite.testAnimatedGIFAndTransparencyFill),
             ("resolution-only resize and smaller-image skipping", suite.testResizeOnlySkipsSmallAndPreservesMetadata),
             ("automatic save location and original preservation", suite.testSaveCopiesBesideOriginal),
             ("replace original and legacy saved options", suite.testReplaceOriginalAndLegacyOptions),

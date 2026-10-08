@@ -34,6 +34,14 @@ public struct Options: Sendable, Codable {
     public var resizeOnly = false
     /// Replace each original with its processed image (the original goes to the Trash).
     public var replaceOriginals = false
+    /// RGB (0...1) used in place of transparency when the output format has no alpha channel.
+    public var flattenColor: [Double] = [1, 1, 1]
+    /// Keep animated images animated when the output is GIF.
+    public var keepAnimation = true
+    /// Animated images exported to a still format become a folder of frames; otherwise only the first frame is exported.
+    public var framesAsFolder = true
+    /// Appended to the original name for saved copies.
+    public var fileSuffix = "-dice"
     public init() {}
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -49,6 +57,10 @@ public struct Options: Sendable, Codable {
         webpLossless = try c.decodeIfPresent(Bool.self, forKey: .webpLossless) ?? webpLossless
         resizeOnly = try c.decodeIfPresent(Bool.self, forKey: .resizeOnly) ?? resizeOnly
         replaceOriginals = try c.decodeIfPresent(Bool.self, forKey: .replaceOriginals) ?? replaceOriginals
+        flattenColor = try c.decodeIfPresent([Double].self, forKey: .flattenColor) ?? flattenColor
+        keepAnimation = try c.decodeIfPresent(Bool.self, forKey: .keepAnimation) ?? keepAnimation
+        framesAsFolder = try c.decodeIfPresent(Bool.self, forKey: .framesAsFolder) ?? framesAsFolder
+        fileSuffix = try c.decodeIfPresent(String.self, forKey: .fileSuffix) ?? fileSuffix
     }
     public func longestEdge(width w: Int, height h: Int) throws -> Int {
         let longest = max(w,h)
@@ -82,6 +94,9 @@ public struct ConversionResult: Sendable {
     public let url: URL
     public let bytes: Int64
     public let note: String?
+    /// For folder results: a file inside the folder to show as the preview.
+    public var previewURL: URL? = nil
+    public var isFolder: Bool { (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
 }
 public enum Engine {
     public static var toolsDirectory: URL {
@@ -122,7 +137,7 @@ public enum Engine {
     }
     public static func pageCount(_ url: URL) throws -> Int {
         if url.pathExtension.lowercased() == "pdf" { return try DocumentImage.pdf(url).numberOfPages }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) as String?, [UTType.gif.identifier, UTType.tiff.identifier].contains(type) else { return 1 }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) as String?, type == UTType.tiff.identifier else { return 1 }
         return max(1, CGImageSourceGetCount(source))
     }
     public static func scaledPreview(_ image: CGImage, maxPixelSize: Int) throws -> CGImage {
@@ -186,7 +201,7 @@ public enum Engine {
         guard target < max(info.width, info.height) else { return nil }
         var resize = options
         resize.format = .original; resize.metadataOnly = false; resize.stripMetadata = false
-        resize.quality = 1; resize.webpLossless = true
+        resize.quality = 1; resize.webpLossless = true; resize.keepAnimation = true
         return try convert(input, options: resize, directory: directory, page: page)
     }
     public static func convert(_ input: URL, options: Options, directory: URL, page: Int = 1) throws -> ConversionResult {
@@ -203,7 +218,7 @@ public enum Engine {
         }
         let count = try pageCount(input)
         let suffix = inputType == UTType.pdf.identifier || (inputType == UTType.tiff.identifier && count > 1) ? "-page-\(page)" : (count > 1 ? "-frame-\(page)" : "")
-        let stem = input.deletingPathExtension().lastPathComponent + suffix + "-dice"
+        let stem = input.deletingPathExtension().lastPathComponent + suffix + options.fileSuffix
         let output = uniqueURL(in: directory, stem: stem, ext: options.metadataOnly ? input.pathExtension : format.ext)
         if options.metadataOnly {
             let inputType = inputType
@@ -217,29 +232,15 @@ public enum Engine {
             return ConversionResult(url: output, bytes: fileSize(output), note: "Pixels unchanged; colour profile and orientation retained")
         }
         let imageInfo = try inspect(input, page: page)
-        guard document || count > 1 || imageInfo.frames == 1 || UTType(inputType)?.conforms(to: .rawImage) == true else { throw DiceError.message("Animated and multi-image files are not converted. Use metadata-only mode or choose a still image.") }
+        let isRaw = UTType(inputType)?.conforms(to: .rawImage) == true
+        if let source, !document, !isRaw, count == 1, imageInfo.frames > 1, inputType != UTType.tiff.identifier {
+            return try convertAnimated(input, source: source, format: format, options: options, info: imageInfo, directory: directory)
+        }
         let edge = try options.longestEdge(width: imageInfo.width, height: imageInfo.height)
         var image = try previewImage(input, maxPixelSize: edge, page: page)
-        if format == .jpeg {
-            guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw DiceError.message("Could not prepare JPEG output.") }
-            ctx.setFillColor(CGColor(gray: 1, alpha: 1)); ctx.fill(CGRect(x: 0,y: 0,width: image.width,height: image.height))
-            ctx.draw(image, in: CGRect(x: 0,y: 0,width: image.width,height: image.height))
-            image = ctx.makeImage()!
-        }
+        if noAlpha.contains(format) { image = try flatten(image, color: options.flattenColor) }
         do {
-            let destination = format == .webp ? output.deletingPathExtension().appendingPathExtension("png") : output
-            defer { if format == .webp { try? FileManager.default.removeItem(at: destination) } }
-            let type = format == .webp ? UTType.png.identifier : format.type
-            guard (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(type) == true,
-                  let dest = CGImageDestinationCreateWithURL(destination as CFURL, type as CFString, 1, nil) else { throw DiceError.message("This Mac cannot encode the selected format.") }
-            CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: min(1,max(0,options.quality)), kCGImagePropertyOrientation: 1] as CFDictionary)
-            guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the converted image.") }
-            if format == .webp {
-                var args = ["-quiet", "-q", String(Int(options.quality * 100)), "-metadata", "icc"]
-                if options.webpLossless { args.append("-lossless") }
-                args += [destination.path, "-o", output.path]
-                _ = try run(toolsDirectory.appendingPathComponent("cwebp"), args)
-            }
+            try encode(image, format: format, options: options, to: output)
             if !options.stripMetadata && !document {
                 // Preserve descriptive tags, but keep the profile that describes the newly encoded pixels.
                 let profile = try exif(["-b", "-ICC_Profile", output.path])
@@ -250,8 +251,96 @@ public enum Engine {
                 args.append(output.path)
                 _ = try exif(args)
             }
-            return ConversionResult(url: output, bytes: fileSize(output), note: format == .jpeg ? "Transparency is flattened onto white" : nil)
+            return ConversionResult(url: output, bytes: fileSize(output), note: noAlpha.contains(format) ? "Transparency is flattened onto \(hex(options.flattenColor))" : nil)
         } catch { try? FileManager.default.removeItem(at: output); throw error }
+    }
+    static let noAlpha: [OutputFormat] = [.jpeg, .bmp]
+    public static func hex(_ color: [Double]) -> String {
+        "#" + (color + [1, 1, 1]).prefix(3).map { String(format: "%02X", Int((min(1, max(0, $0)) * 255).rounded())) }.joined()
+    }
+    /// Draws `image` over an opaque background of `color` so formats without alpha get a predictable fill.
+    static func flatten(_ image: CGImage, color: [Double]) throws -> CGImage {
+        let c = color + [1, 1, 1]
+        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw DiceError.message("Could not prepare the output image.") }
+        ctx.setFillColor(CGColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard let flat = ctx.makeImage() else { throw DiceError.message("Could not prepare the output image.") }
+        return flat
+    }
+    /// Writes one still image in `format`; WebP goes through a temporary PNG and cwebp.
+    static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL) throws {
+        let destination = format == .webp ? output.deletingPathExtension().appendingPathExtension("png") : output
+        defer { if format == .webp { try? FileManager.default.removeItem(at: destination) } }
+        let type = format == .webp ? UTType.png.identifier : format.type
+        guard (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(type) == true,
+              let dest = CGImageDestinationCreateWithURL(destination as CFURL, type as CFString, 1, nil) else { throw DiceError.message("This Mac cannot encode the selected format.") }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: min(1,max(0,options.quality)), kCGImagePropertyOrientation: 1] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the converted image.") }
+        if format == .webp {
+            var args = ["-quiet", "-q", String(Int(options.quality * 100)), "-metadata", "icc"]
+            if options.webpLossless { args.append("-lossless") }
+            args += [destination.path, "-o", output.path]
+            _ = try run(toolsDirectory.appendingPathComponent("cwebp"), args)
+        }
+    }
+    static func frameDelay(_ source: CGImageSource, _ index: Int) -> Double {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any] else { return 0.1 }
+        for key in [kCGImagePropertyGIFDictionary, kCGImagePropertyWebPDictionary, kCGImagePropertyPNGDictionary] {
+            guard let dictionary = props[key as String] as? [String: Any] else { continue }
+            for name in [kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyWebPUnclampedDelayTime, kCGImagePropertyAPNGUnclampedDelayTime, kCGImagePropertyGIFDelayTime, kCGImagePropertyWebPDelayTime, kCGImagePropertyAPNGDelayTime] {
+                if let delay = dictionary[name as String] as? Double, delay > 0 { return delay }
+            }
+        }
+        return 0.1
+    }
+    static func frameImage(_ source: CGImageSource, _ index: Int, maxPixelSize: Int) throws -> CGImage {
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw DiceError.message("Could not read frame \(index + 1).") }
+        return image
+    }
+    /// Animated GIF → animated GIF when `keepAnimation`; otherwise a folder of numbered frames, or just the first frame.
+    static func convertAnimated(_ input: URL, source: CGImageSource, format: OutputFormat, options: Options, info: ImageInfo, directory: URL) throws -> ConversionResult {
+        let total = info.frames
+        let edge = try options.longestEdge(width: info.width, height: info.height)
+        let stem = input.deletingPathExtension().lastPathComponent
+        if format == .gif && options.keepAnimation {
+            let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: "gif")
+            guard let dest = CGImageDestinationCreateWithURL(output as CFURL, UTType.gif.identifier as CFString, total, nil) else { throw DiceError.message("This Mac cannot encode GIF.") }
+            CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+            do {
+                for index in 0..<total {
+                    try autoreleasepool {
+                        let frame = try frameImage(source, index, maxPixelSize: edge)
+                        CGImageDestinationAddImage(dest, frame, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: frameDelay(source, index)]] as CFDictionary)
+                    }
+                }
+                guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the animated GIF.") }
+            } catch { try? FileManager.default.removeItem(at: output); throw error }
+            return ConversionResult(url: output, bytes: fileSize(output), note: "Animation kept (\(total) frames)")
+        }
+        let note = noAlpha.contains(format) ? "Transparency is flattened onto \(hex(options.flattenColor))" : nil
+        func still(_ index: Int, to url: URL) throws {
+            try autoreleasepool {
+                var frame = try frameImage(source, index, maxPixelSize: edge)
+                if noAlpha.contains(format) { frame = try flatten(frame, color: options.flattenColor) }
+                try encode(frame, format: format, options: options, to: url)
+            }
+        }
+        if !options.framesAsFolder {
+            let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: format.ext)
+            do { try still(0, to: output) } catch { try? FileManager.default.removeItem(at: output); throw error }
+            return ConversionResult(url: output, bytes: fileSize(output), note: note)
+        }
+        let folder = uniqueURL(in: directory, stem: stem + "-frames" + options.fileSuffix, ext: "")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        do {
+            let digits = max(4, String(total).count)
+            var size: Int64 = 0
+            for index in 0..<total {
+                let file = folder.appendingPathComponent("frame-" + String(format: "%0\(digits)d", index + 1) + "." + format.ext)
+                try still(index, to: file); size += fileSize(file)
+            }
+            return ConversionResult(url: folder, bytes: size, note: "\(total) frames", previewURL: folder.appendingPathComponent("frame-" + String(format: "%0\(digits)d", 1) + "." + format.ext))
+        } catch { try? FileManager.default.removeItem(at: folder); throw error }
     }
     public static func saveCopy(_ result: ConversionResult, beside input: URL, directory: URL? = nil) throws -> URL {
         let output = uniqueURL(in: directory ?? input.deletingLastPathComponent(), stem: result.url.deletingPathExtension().lastPathComponent, ext: result.url.pathExtension)
@@ -274,8 +363,9 @@ public enum Engine {
         return target
     }
     public static func uniqueURL(in directory: URL, stem: String, ext: String) -> URL {
-        var candidate = directory.appendingPathComponent(stem + "." + ext); var suffix = 2
-        while FileManager.default.fileExists(atPath: candidate.path) { candidate = directory.appendingPathComponent(stem + "-\(suffix)." + ext); suffix += 1 }
+        let dot = ext.isEmpty ? "" : "."
+        var candidate = directory.appendingPathComponent(stem + dot + ext); var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.path) { candidate = directory.appendingPathComponent(stem + "-\(suffix)" + dot + ext); suffix += 1 }
         return candidate
     }
 }

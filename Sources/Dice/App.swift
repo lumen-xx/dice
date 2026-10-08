@@ -77,6 +77,7 @@ final class DiceWindow: NSWindow {
     @objc func openFromMenu(_ sender: Any?) { showWindow() }
     /// Close the window once a run finishes; quit unless the menu bar item keeps Dice available.
     func finishRun() {
+        guard model.preferences.closeWhenDone else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [self] in
             window?.close()
             if !model.preferences.showInMenuBar { NSApp.terminate(nil) }
