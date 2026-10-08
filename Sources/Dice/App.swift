@@ -31,19 +31,14 @@ final class DiceWindow: NSWindow {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func showWindow() {
         if window == nil {
-            let w = DiceWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 460), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-            w.title = "Dice"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
+            let w = DiceWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 460), styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
+            w.title = "Dice"; w.hasShadow = true
             w.isReleasedWhenClosed = false; w.isOpaque = false; w.backgroundColor = .clear
             w.isMovableByWindowBackground = true; w.delegate = self
             w.collectionBehavior.insert(.fullScreenNone)
-            w.standardWindowButton(.closeButton)?.isHidden = false
-            for type in [NSWindow.ButtonType.miniaturizeButton, .zoomButton] {
-                w.standardWindowButton(type)?.isHidden = false
-                w.standardWindowButton(type)?.isEnabled = false
-            }
             let effect = NSVisualEffectView(); effect.material = .hudWindow; effect.blendingMode = .behindWindow; effect.state = .active
             effect.wantsLayer = true; effect.layer?.cornerRadius = DiceStyle.cornerRadius; effect.layer?.masksToBounds = true
-            let hosting = NSHostingView(rootView: DiceView(model: model)); hosting.translatesAutoresizingMaskIntoConstraints = false
+            let hosting = NSHostingView(rootView: DiceView(model: model, close: { [weak w] in w?.close() })); hosting.translatesAutoresizingMaskIntoConstraints = false
             effect.addSubview(hosting)
             NSLayoutConstraint.activate([hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor), hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor), hosting.topAnchor.constraint(equalTo: effect.topAnchor), hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor)])
             w.contentView = effect; w.center(); window = w

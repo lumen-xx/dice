@@ -31,7 +31,7 @@ Avoid one-off font sizes in new UI. Text follows system light/dark appearance an
 
 ## Layout and interaction
 
-Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. Toolbar symbol targets are 30 × 30 pt; root corners are 14 pt. Keep the top-left traffic-light area clear. Native close is available; minimize and fullscreen are disabled.
+Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. Toolbar symbol targets are 30 × 30 pt; root corners are 14 pt. The top-left close button matches the capsule material and dimensions of the top-right toolbar. There is no native title bar or traffic-light strip; the image surface and drag glow cover the entire window. Minimize and fullscreen are disabled.
 
 The top-right toolbar carries Add, Metadata, Settings, Save and Start. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard.
 

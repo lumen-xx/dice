@@ -60,7 +60,7 @@ if __name__ == '__main__':
     shutil.copy2(binpath / 'Dice', contents / 'MacOS/Dice')
     prepare_tools(resources / 'Tools')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', resources)
-    plist = dict(CFBundleExecutable='Dice', CFBundleIdentifier='com.opyuii.dice', CFBundleName='Dice', CFBundleDisplayName='Dice', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.3', CFBundleVersion='4', LSMinimumSystemVersion='14.0', LSUIElement=True, NSHighResolutionCapable=True, CFBundleIconFile='Dice', CFBundleDocumentTypes=[dict(CFBundleTypeName='Image', CFBundleTypeRole='Viewer', LSItemContentTypes=['public.image'], LSHandlerRank='Alternate')])
+    plist = dict(CFBundleExecutable='Dice', CFBundleIdentifier='com.opyuii.dice', CFBundleName='Dice', CFBundleDisplayName='Dice', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.4', CFBundleVersion='5', LSMinimumSystemVersion='14.0', LSUIElement=True, NSHighResolutionCapable=True, CFBundleIconFile='Dice', CFBundleDocumentTypes=[dict(CFBundleTypeName='Image', CFBundleTypeRole='Viewer', LSItemContentTypes=['public.image'], LSHandlerRank='Alternate')])
     (contents / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('swift', str(ROOT / 'scripts/icon.swift'), str(BUILD))
     run('iconutil', '-c', 'icns', str(BUILD / 'Dice.iconset'), '-o', str(resources / 'Dice.icns'))
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     size = sum(f.stat().st_size for f in APP.rglob('*') if f.is_file())
     print(f'Installed app: {size / 1_000_000:.2f} MB')
     if size >= 40_000_000: raise SystemExit('App exceeds the 40 MB budget')
-    archive = BUILD / 'Dice-v0.1.3-apple-silicon.zip'
+    archive = BUILD / 'Dice-v0.1.4-apple-silicon.zip'
     if archive.exists(): archive.unlink()
     run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(APP), str(archive))
     (BUILD / 'app-path.txt').write_text(str(APP))

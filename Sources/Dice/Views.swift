@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 private let accent = DiceStyle.accent
 struct DiceView: View {
     @ObservedObject var model: DiceModel
+    let close: () -> Void
     @State private var metadata = false
     @State private var settings = false
     @State private var batch = false
@@ -40,7 +41,7 @@ struct DiceView: View {
                     } else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
             }
-            toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch ? 80 : 0)
+            toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch ? 56 : 0)
             if !model.items.isEmpty {
                 VStack { Spacer(); HStack { Spacer(); pager }.padding(DiceStyle.inset) }
             }
@@ -48,6 +49,15 @@ struct DiceView: View {
         .font(DiceStyle.body)
         .ignoresSafeArea()
         .frame(minWidth: 520, minHeight: 420)
+        .overlay(alignment: .topLeading) {
+            icon("xmark", "Close Dice") { close() }
+                .keyboardShortcut("w", modifiers: .command)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 4).padding(.vertical, 3)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
+                .padding(DiceStyle.inset)
+        }
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
             guard !model.busy && !model.importing else { return false }
             let group = DispatchGroup(); let urls = DropURLs()

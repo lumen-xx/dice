@@ -1,3 +1,11 @@
+# v0.1.4 validation — 2026-10-08
+
+The release build compiles and the installed bundle passes deep, strict signature verification. A native preview showed the full 620 × 460 borderless surface, a custom left-side close capsule matching the right toolbar, and no native traffic lights. The drag overlay now shares the complete content/window bounds; there is no title-bar strip outside it.
+
+The custom close button was exercised: the development process switched to accessory activation (Dock hidden), and reopening restored the editor. Minimize/fullscreen overrides remain in place; Command-W also invokes the custom close action. A held Finder drag was not visually checked in this update.
+
+---
+
 # v0.1.3 validation — 2026-10-08
 
 The release build compiles. The native metadata preview was checked with a generated image: grouped flat rows, unboxed header, larger search field, filtering to two Artist tags, and inline full-value expansion. Copy/export actions remain available from the header and row context menu. Search fields in metadata and batch views use 36-point height and 13-point system text.
