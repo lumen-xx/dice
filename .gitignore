@@ -1,0 +1,6 @@
+.build/
+build/
+.DS_Store
+vendor/*
+!vendor/README.md
+!vendor/licenses/
