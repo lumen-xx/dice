@@ -7,6 +7,7 @@ enum DiceStyle {
     static let heading = Font.system(size: 14, weight: .semibold)
     static let body = Font.system(size: 13)
     static let label = Font.system(size: 12, weight: .medium)
+    static let metadataName = Font.system(size: 12)
     static let caption = Font.system(size: 11)
     static let data = Font.system(size: 11, design: .monospaced)
     static let emptySymbol = Font.system(size: 44, weight: .light)

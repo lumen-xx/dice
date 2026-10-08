@@ -29,7 +29,7 @@ struct DiceView: View {
                     Text("or drop them here").font(DiceStyle.caption).foregroundStyle(.tertiary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if metadata {
-                MetadataPane(info: inspected, model: model).id(model.selected).padding(.top, 60).padding(.bottom, 52)
+                MetadataPane(info: inspected).id(model.selected).padding(.top, 54).padding(.bottom, 52)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
@@ -77,16 +77,14 @@ struct DiceView: View {
         HStack(spacing: 2) {
             if batch {
                 icon("arrow.left", "Back to image") { batch = false }
-                Spacer()
-                Text("Images").font(DiceStyle.label).foregroundStyle(.secondary)
+                Text("Images").font(DiceStyle.heading)
                 Spacer()
                 icon("plus", "Add images") { model.chooseFiles() }.disabled(model.busy || model.importing)
             } else if metadata {
                 icon("arrow.left", "Back to image") { flip() }
-                Spacer(minLength: 10)
-                Text("Metadata").font(DiceStyle.label).foregroundStyle(.secondary)
+                Text("Metadata").font(DiceStyle.heading)
                 Spacer()
-                if let info = inspected { Menu { Button("Copy all tags") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(info.rows.map { "[\($0.group)] \($0.name): \($0.value)" }.joined(separator: "\n"), forType: .string) }; Button("Export JSON…") { model.exportMetadata(info) } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().padding(7) }
+                if let info = inspected { Menu { Button("Copy all tags") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(info.rows.map { "[\($0.group)] \($0.name): \($0.value)" }.joined(separator: "\n"), forType: .string) }; Button("Export JSON…") { model.exportMetadata(info) } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).tint(.secondary).fixedSize().padding(7) }
             } else {
                 icon("plus", "Add images") { model.chooseFiles() }.disabled(model.busy || model.importing)
                 if model.busy || model.importing { ProgressView().controlSize(.mini).padding(.horizontal, 8) }
@@ -99,8 +97,8 @@ struct DiceView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 4).padding(.vertical, 3)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
+        .background { if !metadata && !batch { Capsule().fill(.ultraThinMaterial) } }
+        .overlay { if !metadata && !batch { Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5) } }
         .frame(maxWidth: metadata || batch ? .infinity : nil)
     }
     var pager: some View {
@@ -149,41 +147,6 @@ struct DiceView: View {
         preview = loaded.0; inspected = loaded.1; previewError = loaded.2
     }
 }
-struct MetadataPane: View {
-    let info: ImageInfo?
-    @ObservedObject var model: DiceModel
-    @State private var search = ""
-    @State private var group = "All"
-    @State private var selected: MetadataRow.ID?
-    var rows: [MetadataRow] { (info?.rows ?? []).filter { (group == "All" || $0.group == group) && (search.isEmpty || "\($0.group) \($0.name) \($0.value)".localizedCaseInsensitiveContains(search)) } }
-    var groups: [String] { ["All"] + Array(Set((info?.rows ?? []).map(\.group))).sorted() }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let info {
-                HStack(spacing: 8) {
-                    Text("\(info.width) × \(info.height)").monospaced()
-                    Text(info.value("FileType") ?? "Image")
-                    Text(bytes(info.bytes))
-                    Spacer()
-                    if info.hasGPS { Image(systemName: "location.fill").foregroundStyle(accent).help("GPS metadata found") }
-                    Text("\(info.rows.count) tags")
-                }.font(DiceStyle.caption).foregroundStyle(.secondary)
-                if let camera = info.camera { Text(camera).font(DiceStyle.caption).foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 8) {
-                TextField("Search metadata", text: $search).textFieldStyle(.roundedBorder)
-                Picker("Group", selection: $group) { ForEach(groups,id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 110)
-            }.controlSize(.small)
-            Table(rows, selection: $selected) {
-                TableColumn("Tag") { row in VStack(alignment: .leading, spacing: 2) { Text(row.name).font(DiceStyle.label); Text(row.group).font(DiceStyle.caption).foregroundStyle(.secondary) } }.width(min: 120, ideal: 155, max: 210)
-                TableColumn("Value") { row in Text(row.value).font(DiceStyle.data).textSelection(.enabled).help(row.value).contextMenu { Button("Copy value") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(row.value, forType: .string) } } }
-            }.scrollContentBackground(.hidden)
-            if let row = rows.first(where: { $0.id == selected }) {
-                ScrollView { Text(row.value).font(DiceStyle.data).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 46)
-            }
-        }.padding(.horizontal, 16).padding(.bottom, 14)
-    }
-}
 
 struct BatchPane: View {
     @ObservedObject var model: DiceModel
@@ -193,7 +156,14 @@ struct BatchPane: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                TextField("Search names, metadata or image text", text: $query).textFieldStyle(.roundedBorder).controlSize(.small)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search images, metadata or text", text: $query).textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).accessibilityLabel("Clear image search")
+                    }
+                }.font(DiceStyle.body).padding(.horizontal, 12).frame(height: 36)
+                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
                 if model.importing { ProgressView().controlSize(.mini).help("Reading metadata and text") }
             }
             if filtered.isEmpty {

@@ -12,6 +12,7 @@ Use the macOS system font (SF Pro) for interface text, and the system monospaced
 | Heading | 14 pt semibold | Settings headings |
 | Body | 13 pt regular | Main instructions and general text |
 | Label | 12 pt medium | Section names, filenames and tag names |
+| Metadata name | 12 pt regular | Flat metadata rows |
 | Caption | 11 pt regular | Groups, supporting text and summaries |
 | Data | 11 pt monospaced | Dimensions and metadata values |
 | Control | 14 pt medium | Toolbar symbols |
@@ -37,3 +38,5 @@ The top-right toolbar carries Add, Metadata, Settings, Save and Start. The botto
 Use restrained transitions and honour Reduce Motion. Avoid idle animation. Search is local and matches filename/path, image properties, tag names/values and recognised text. Removing a batch entry never deletes the original file.
 
 Launching from Finder or Applications reveals the drop surface. Only an explicit Choose images or Add action opens the file picker; opening image files imports them directly.
+
+The metadata view uses an unboxed navigation header and flat name/value rows. Show each group name once as a quiet section label. Search has a single subtle background; the group filter stays neutral. Select a row to reveal its full, selectable value in place. Avoid table chrome and alternating filled rows.

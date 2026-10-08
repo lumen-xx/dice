@@ -1,3 +1,11 @@
+# v0.1.3 validation — 2026-10-08
+
+The release build compiles. The native metadata preview was checked with a generated image: grouped flat rows, unboxed header, larger search field, filtering to two Artist tags, and inline full-value expansion. Copy/export actions remain available from the header and row context menu. Search fields in metadata and batch views use 36-point height and 13-point system text.
+
+The installed application passes deep, strict code-signature verification. Processing code is unchanged in this interface update; the prior 11 processing/search checks are recorded below.
+
+---
+
 # v0.1.2 validation — 2026-10-08
 
 The release build compiles. An isolated copy of the packaged app launched to the empty drop surface with no file picker. Clicking Choose images explicitly opened the picker; Cancel returned to the editor. The check used a separate application identifier to leave the active Dice session intact.
