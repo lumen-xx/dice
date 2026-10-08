@@ -57,6 +57,6 @@ struct AppPreferences: Codable, Equatable {
         exportMode = try c.decodeIfPresent(ExportMode.self, forKey: .exportMode) ?? d.exportMode
         menuBarDrop = try c.decodeIfPresent(Bool.self, forKey: .menuBarDrop) ?? d.menuBarDrop
         dropStartsImmediately = try c.decodeIfPresent(Bool.self, forKey: .dropStartsImmediately) ?? d.dropStartsImmediately
-        dragTarget = try c.decodeIfPresent(DragTarget.self, forKey: .dragTarget) ?? d.dragTarget
+        dragTarget = (try? c.decodeIfPresent(DragTarget.self, forKey: .dragTarget)) ?? d.dragTarget
     }
 }

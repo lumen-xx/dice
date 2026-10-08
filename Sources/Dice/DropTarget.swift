@@ -1,7 +1,7 @@
 import AppKit
 
 enum DragTarget: String, Codable, CaseIterable, Identifiable {
-    case off = "Off", notch = "Top center (notch)", topRight = "Top right corner", bottomRight = "Bottom right corner"
+    case off = "Off", notch = "Top center (notch)"
     var id: String { rawValue }
 }
 
@@ -46,8 +46,6 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
         switch target {
         case .off: return false
         case .notch: return abs(p.x - f.midX) < 170 && p.y > f.maxY - 44
-        case .topRight: return p.x > f.maxX - 150 && p.y > f.maxY - 150
-        case .bottomRight: return p.x > f.maxX - 150 && p.y < f.minY + 150
         }
     }
     private func show(on screen: NSScreen) {
