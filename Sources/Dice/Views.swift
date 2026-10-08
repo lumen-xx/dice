@@ -61,7 +61,12 @@ struct DiceView: View {
             }
             group.notify(queue: .main) { model.add(urls.values) }; return true
         }
-        .overlay { if targeted { RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.6), lineWidth: 1).allowsHitTesting(false) } }
+        .overlay {
+            if targeted && !model.busy && !model.importing {
+                AuroraDropBorder().allowsHitTesting(false).transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: targeted)
         .tint(accent)
         .task(id: displayedURL) { await loadPreview() }
         .alert("Dice couldn’t finish", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("OK") { model.alert = nil } } message: { Text(model.alert ?? "") }

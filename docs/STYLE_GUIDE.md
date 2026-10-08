@@ -26,6 +26,7 @@ Avoid one-off font sizes in new UI. Text follows system light/dark appearance an
 - The window uses native HUD material with behind-window blur.
 - Toolbar and pager use ultra-thin material, a capsule shape and a subtle 0.5 pt edge.
 - Errors use the system red; disabled controls use native disabled appearance.
+- Drag-over illuminates the entire window edge with a soft mint, cyan and violet aurora. Motion runs only during an accepted drag hover and stops with Reduce Motion enabled.
 
 ## Layout and interaction
 
@@ -34,3 +35,5 @@ Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. To
 The top-right toolbar carries Add, Metadata, Settings, Save and Start. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard.
 
 Use restrained transitions and honour Reduce Motion. Avoid idle animation. Search is local and matches filename/path, image properties, tag names/values and recognised text. Removing a batch entry never deletes the original file.
+
+Launching from Finder or Applications reveals the drop surface. Only an explicit Choose images or Add action opens the file picker; opening image files imports them directly.

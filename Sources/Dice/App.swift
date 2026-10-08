@@ -25,6 +25,9 @@ final class DiceWindow: NSWindow {
     let model = DiceModel()
     var window: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) { showWindow() }
+    // Finder launches should reveal Dice's drop surface, never the default document picker.
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool { showWindow(); return true }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func showWindow() {
         if window == nil {

@@ -1,3 +1,11 @@
+# v0.1.2 validation — 2026-10-08
+
+The release build compiles. An isolated copy of the packaged app launched to the empty drop surface with no file picker. Clicking Choose images explicitly opened the picker; Cancel returned to the editor. The check used a separate application identifier to leave the active Dice session intact.
+
+The new full-window aurora border is scoped to the accepted drag-over state, with its timeline limited to that state's lifetime. Reduce Motion pauses the gradient and disables the hover transition. The actual drag-hover appearance has not been verified through a held Finder drag.
+
+---
+
 # v0.1.1 validation — 2026-10-08
 
 The release build compiles and the installed `/Applications/Dice.app` passes deep, strict code-signature verification. It is ad-hoc signed, not notarized.
