@@ -78,6 +78,8 @@ struct ImageItem: Identifiable {
             options.resize = preferences.defaultResize
             options.edge = preferences.defaultEdge
             options.percent = preferences.defaultPercent
+            options.replaceOriginals = preferences.defaultReplaceOriginals
+            options.stripMetadata = preferences.alwaysStripMetadata || preferences.defaultStripMetadata
         }
         closeRequested = false
         importing = true
@@ -146,8 +148,9 @@ struct ImageItem: Identifiable {
         guard !busy, !importing, !items.isEmpty else { return }
         if preferences.useExportFolder && preferences.exportFolder.isEmpty { alert = "Choose a default export folder in Settings."; settingsPresented = true; return }
         let exportDirectory = preferences.useExportFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
-        let snapshot = options
-        let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly
+        var snapshot = options
+        if preferences.alwaysStripMetadata { snapshot.stripMetadata = true }
+        let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly && !preferences.alwaysStripMetadata
         busy = true; cancelRequested = false; completed = 0
         for i in items.indices {
             if let result = items[i].result { previewCache.remove(items[i].previewCacheKey); try? FileManager.default.removeItem(at: result.url) }

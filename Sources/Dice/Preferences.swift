@@ -14,6 +14,9 @@ struct AppPreferences: Codable, Equatable {
     var startAtLogin = false
     var showInMenuBar = false
     var stayOnTop = false
+    var defaultReplaceOriginals = false
+    var defaultStripMetadata = true
+    var alwaysStripMetadata = false
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -30,5 +33,8 @@ struct AppPreferences: Codable, Equatable {
         startAtLogin = try c.decodeIfPresent(Bool.self, forKey: .startAtLogin) ?? d.startAtLogin
         showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
         stayOnTop = try c.decodeIfPresent(Bool.self, forKey: .stayOnTop) ?? d.stayOnTop
+        defaultReplaceOriginals = try c.decodeIfPresent(Bool.self, forKey: .defaultReplaceOriginals) ?? d.defaultReplaceOriginals
+        defaultStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .defaultStripMetadata) ?? d.defaultStripMetadata
+        alwaysStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .alwaysStripMetadata) ?? d.alwaysStripMetadata
     }
 }
