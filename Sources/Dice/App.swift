@@ -151,7 +151,7 @@ final class DiceWindow: NSWindow {
         guard !model.busy && !model.importing else { showWindow(); model.alert = "Finish the current images before opening another selection."; return }
         model.clear(); showWindow(); model.add(urls)
     }
-    func windowWillClose(_ notification: Notification) { window = nil; model.closeSession(); NSApp.setActivationPolicy(.accessory) }
+    func windowWillClose(_ notification: Notification) { window = nil; model.settingsPresented = false; model.closeSession(); NSApp.setActivationPolicy(.accessory) }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) { model.cleanup() }
 }
