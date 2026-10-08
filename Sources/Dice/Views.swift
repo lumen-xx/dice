@@ -261,6 +261,14 @@ struct DiceView: View {
             Text("Updates").font(DiceStyle.heading)
             Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
             Button("Check for updates…") { checkUpdates() }
+            Divider().padding(.vertical, 4)
+            VStack(alignment: .leading, spacing: 2) {
+                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+                let year = Calendar.current.component(.year, from: Date())
+                Text("Dice \(version)")
+                Text("© \(String(year)) opyuii. All rights reserved.")
+                Link("opyuii.com", destination: URL(string: "https://opyuii.com")!)
+            }.font(DiceStyle.caption).foregroundStyle(.secondary)
         }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 380).tint(accent)
     }
     var imageSettingsPanel: some View {
