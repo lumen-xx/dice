@@ -8,6 +8,11 @@ import AppKit
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         let menu = NSMenu(); let root = NSMenuItem(); let applicationMenu = NSMenu()
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(DiceDelegate.checkForUpdates(_:)), keyEquivalent: "")
+        updates.target = delegate; applicationMenu.addItem(updates)
+        let previews = NSMenuItem(title: "Include Preview Releases", action: #selector(DiceDelegate.togglePreviewUpdates(_:)), keyEquivalent: "")
+        previews.target = delegate; previews.state = delegate.updates.includePreviews ? .on : .off
+        applicationMenu.addItem(previews); applicationMenu.addItem(.separator())
         applicationMenu.addItem(withTitle: "Quit Dice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         root.submenu = applicationMenu; menu.addItem(root); app.mainMenu = menu
         app.run()
@@ -23,8 +28,11 @@ final class DiceWindow: NSWindow {
 }
 @MainActor final class DiceDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model = DiceModel()
+    lazy var updates = DiceUpdates(model: model)
     var window: NSWindow?
-    func applicationDidFinishLaunching(_ notification: Notification) { showWindow() }
+    func applicationDidFinishLaunching(_ notification: Notification) { updates.start(); showWindow() }
+    @objc func checkForUpdates(_ sender: Any?) { showWindow(); updates.check(sender) }
+    @objc func togglePreviewUpdates(_ sender: NSMenuItem) { updates.includePreviews.toggle(); sender.state = updates.includePreviews ? .on : .off }
     // Finder launches should reveal Dice's drop surface, never the default document picker.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
     func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool { showWindow(); return true }

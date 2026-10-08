@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Build an Apple-silicon development app using pinned Homebrew tool versions."""
-import pathlib, subprocess, shutil, plistlib, re, os, tempfile
+import pathlib, subprocess, shutil, plistlib, re, os, tempfile, json
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD = ROOT / 'build'
 APP = BUILD / 'Dice.app'
+UPDATE_CONFIG = json.loads((ROOT / 'updates/config.json').read_text())
+VERSION = json.loads((ROOT / 'updates/version.json').read_text())
 def call(*args): return subprocess.check_output(args, text=True).strip()
 def run(*args): subprocess.run(args, check=True)
 def prepare_tools(destination):
@@ -56,21 +58,27 @@ if __name__ == '__main__':
     contents = APP / 'Contents'
     (contents / 'MacOS').mkdir(parents=True)
     resources = contents / 'Resources'; resources.mkdir()
+    sparkle_root = ROOT / '.build/artifacts/sparkle/Sparkle'
+    framework = sparkle_root / 'Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework'
+    (contents / 'Frameworks').mkdir()
+    shutil.copytree(framework, contents / 'Frameworks/Sparkle.framework', symlinks=True)
+    shutil.copy2(sparkle_root / 'LICENSE', resources / 'Sparkle-LICENSE.txt')
     binpath = pathlib.Path(call('swift', 'build', '-c', 'release', '--show-bin-path', '--package-path', str(ROOT)))
     shutil.copy2(binpath / 'Dice', contents / 'MacOS/Dice')
     prepare_tools(resources / 'Tools')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', resources)
-    plist = dict(CFBundleExecutable='Dice', CFBundleIdentifier='com.opyuii.dice', CFBundleName='Dice', CFBundleDisplayName='Dice', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.4', CFBundleVersion='5', LSMinimumSystemVersion='14.0', LSUIElement=True, NSHighResolutionCapable=True, CFBundleIconFile='Dice', CFBundleDocumentTypes=[dict(CFBundleTypeName='Image', CFBundleTypeRole='Viewer', LSItemContentTypes=['public.image'], LSHandlerRank='Alternate')])
+    plist = dict(CFBundleExecutable='Dice', CFBundleIdentifier='com.opyuii.dice', CFBundleName='Dice', CFBundleDisplayName='Dice', CFBundlePackageType='APPL', CFBundleShortVersionString=VERSION['version'], CFBundleVersion=str(VERSION['build']), LSMinimumSystemVersion='14.0', LSUIElement=True, NSHighResolutionCapable=True, CFBundleIconFile='Dice', CFBundleDocumentTypes=[dict(CFBundleTypeName='Image', CFBundleTypeRole='Viewer', LSItemContentTypes=['public.image'], LSHandlerRank='Alternate')], SUFeedURL=UPDATE_CONFIG['feed_url'], SUPublicEDKey=UPDATE_CONFIG['public_key'], SUEnableAutomaticChecks=False, SUAutomaticallyUpdate=False, SUEnableSystemProfiling=False, SUVerifyUpdateBeforeExtraction=True, SURequireSignedFeed=True, SUSignedFeedFailureExpirationInterval=0)
     (contents / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('swift', str(ROOT / 'scripts/icon.swift'), str(BUILD))
     run('iconutil', '-c', 'icns', str(BUILD / 'Dice.iconset'), '-o', str(resources / 'Dice.icns'))
     for key in ('com.apple.FinderInfo', 'com.apple.ResourceFork'):
         subprocess.run(['xattr', '-dr', key, str(APP)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run('codesign', '--force', '--sign', '-', str(APP))
+    run('codesign', '--verify', '--deep', '--strict', str(APP))
     size = sum(f.stat().st_size for f in APP.rglob('*') if f.is_file())
     print(f'Installed app: {size / 1_000_000:.2f} MB')
     if size >= 40_000_000: raise SystemExit('App exceeds the 40 MB budget')
-    archive = BUILD / 'Dice-v0.1.4-apple-silicon.zip'
+    archive = BUILD / ('Dice-v' + VERSION['version'] + '-apple-silicon.zip')
     if archive.exists(): archive.unlink()
     run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(APP), str(archive))
     (BUILD / 'app-path.txt').write_text(str(APP))

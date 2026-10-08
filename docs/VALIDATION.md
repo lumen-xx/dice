@@ -1,3 +1,15 @@
+# v0.1.6 updater validation — 2026-10-08
+
+Sparkle 2.10.0 is pinned in SwiftPM and bundled with its license. The packaged app passes deep, strict signature verification and remains below the 40 MB budget: approximately 26.2 MB installed / 7.8 MB zipped. All 11 processing/search checks pass.
+
+The signed archive and signed feed verify against the Dice Keychain key. Modified archive and feed fixtures are rejected. Reusing an already-published build is rejected by the publisher. Public assets and feeds are hosted separately from the private source repository; no access token is packaged.
+
+A native local update test installed build 6 over build 5 and relaunched at the original app path. Server logs confirmed feed/archive requests; the installed Info.plist changed to 0.1.5/build 6, and the subsequent check reported that version up to date. The public release feed and archive are published; GitHub’s raw feed can lag while its CDN refreshes.
+
+Checks are manual by default. The updater postpones relaunch if image processing/import or unsaved processed copies remain. That session-protection branch is code-reviewed but was not exercised in the native update test. Initial browser-download Gatekeeper approval and cross-machine compatibility remain to be validated; update signatures do not notarize Dice itself.
+
+---
+
 # v0.1.4 validation — 2026-10-08
 
 The release build compiles and the installed bundle passes deep, strict signature verification. A native preview showed the full 620 × 460 borderless surface, a custom left-side close capsule matching the right toolbar, and no native traffic lights. The drag overlay now shares the complete content/window bounds; there is no title-bar strip outside it.

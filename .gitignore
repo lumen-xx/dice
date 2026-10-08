@@ -4,3 +4,5 @@ build/
 vendor/*
 !vendor/README.md
 !vendor/licenses/
+
+__pycache__/
