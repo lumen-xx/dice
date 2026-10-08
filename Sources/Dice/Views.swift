@@ -11,6 +11,7 @@ struct DiceView: View {
     var checkUpdates: () -> Void = {}
     @State private var imageSettingsPresented = false
     @State private var exportPopoverPresented = false
+    @State private var finderMenu = FinderMenu.isEnabled
     @State private var metadata = false
     @State private var batch = false
     @State private var batchSearch = ""
@@ -257,6 +258,13 @@ struct DiceView: View {
             Picker("Drag files to reveal a drop target", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }
             if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off { Toggle("Start right after a drop", isOn: $model.preferences.dropStartsImmediately) }
             Toggle("Stay on top of other apps", isOn: $model.preferences.stayOnTop)
+            if FinderMenu.isAvailable {
+                HStack(spacing: 6) {
+                    Toggle("Show “Edit with Dice” in Finder's right-click menu", isOn: Binding(get: { finderMenu }, set: { finderMenu = $0; FinderMenu.setEnabled($0) }))
+                    InfoTip("Adds or removes the item for images and PDFs. Finder may take a moment to update.")
+                    Spacer(minLength: 0)
+                }
+            }
             Divider().padding(.vertical, 4)
             Text("Updates").font(DiceStyle.heading)
             Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
