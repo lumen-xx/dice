@@ -187,8 +187,8 @@ struct DiceView: View {
             if model.preferences.defaultResize == .percent { HStack { Text("Scale"); number($model.preferences.defaultPercent); Text("%") } }
             HStack { Text("Default quality"); Slider(value: $model.preferences.defaultQuality, in: 0.1...1); Text("\(Int(model.preferences.defaultQuality * 100))%").monospacedDigit() }
             Toggle("Remove personal metadata by default", isOn: $model.preferences.defaultStripMetadata).disabled(model.preferences.alwaysStripMetadata)
-            Toggle("Always remove personal metadata", isOn: $model.preferences.alwaysStripMetadata).help("Removes metadata from every export and hides the option in image settings")
-            Toggle("Replace originals by default", isOn: $model.preferences.defaultReplaceOriginals).help("Original goes to the Trash; PDFs, SVGs and multi-frame files are always saved as copies")
+            HStack(spacing: 6) { Toggle("Always remove personal metadata", isOn: $model.preferences.alwaysStripMetadata); InfoTip("Removes metadata from every export and hides the option in image settings"); Spacer(minLength: 0) }
+            HStack(spacing: 6) { Toggle("Replace originals by default", isOn: $model.preferences.defaultReplaceOriginals); InfoTip("Original goes to the Trash; PDFs, SVGs and multi-frame files are always saved as copies"); Spacer(minLength: 0) }
             Text("Defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)
             Text("General").font(DiceStyle.heading)
@@ -211,13 +211,13 @@ struct DiceView: View {
                 if model.options.resize == .edge { HStack { Text("Longest edge"); number($model.options.edge); Text("px") } }
                 if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
                 if model.options.resize == .fit { HStack { number($model.options.width); Text("×"); number($model.options.height); Text("px") } }
-                if model.options.resize != .original && !model.preferences.alwaysStripMetadata { Toggle("Resize only", isOn: $model.options.resizeOnly).help("Keep format and metadata; skip images already within the target size") }
+                if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
                 if model.options.format.usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { HStack { Text("Quality"); Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() } }
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
             }
             if !model.preferences.alwaysStripMetadata { Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly) }
             Divider()
-            Toggle("Replace originals", isOn: $model.options.replaceOriginals).help("Move each original to the Trash and save the result under its name. PDFs, SVGs and multi-frame files are always saved as copies.")
+            HStack(spacing: 6) { Toggle("Replace originals", isOn: $model.options.replaceOriginals); InfoTip("Move each original to the Trash and save the result under its name. PDFs, SVGs and multi-frame files are always saved as copies."); Spacer(minLength: 0) }
         }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 360).tint(accent)
             .disabled(model.busy || model.importing)
     }
@@ -303,4 +303,21 @@ final class DropURLs: @unchecked Sendable {
     private let lock = NSLock(); private var storage: [URL] = []
     func append(_ url: URL) { lock.lock(); defer { lock.unlock() }; storage.append(url) }
     var values: [URL] { lock.lock(); defer { lock.unlock() }; return storage }
+}
+
+/// A small info icon whose explanation appears instantly on hover or click, instead of the delayed system tooltip.
+struct InfoTip: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    @State private var shown = false
+    var body: some View {
+        Image(systemName: "info.circle").font(DiceStyle.caption).foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+            .onHover { shown = $0 }
+            .onTapGesture { shown.toggle() }
+            .popover(isPresented: $shown, arrowEdge: .bottom) {
+                Text(text).font(DiceStyle.caption).fixedSize(horizontal: false, vertical: true).frame(width: 220, alignment: .leading).padding(10)
+            }
+            .accessibilityLabel("More information").accessibilityHint(text)
+    }
 }
