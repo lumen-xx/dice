@@ -1,6 +1,10 @@
 import Foundation
 import DiceCore
 
+enum ExportMode: String, Codable, CaseIterable, Identifiable {
+    case save = "Save copies", clipboard = "Copy to clipboard"
+    var id: String { rawValue }
+}
 struct AppPreferences: Codable, Equatable {
     var useExportFolder = false
     var exportFolder = ""
@@ -22,6 +26,10 @@ struct AppPreferences: Codable, Equatable {
     var framesAsFolder = true
     var fileSuffix = "-dice"
     var closeWhenDone = true
+    var exportMode: ExportMode = .save
+    var menuBarDrop = true
+    var dropStartsImmediately = false
+    var dragTarget: DragTarget = .off
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -46,5 +54,9 @@ struct AppPreferences: Codable, Equatable {
         framesAsFolder = try c.decodeIfPresent(Bool.self, forKey: .framesAsFolder) ?? d.framesAsFolder
         fileSuffix = try c.decodeIfPresent(String.self, forKey: .fileSuffix) ?? d.fileSuffix
         closeWhenDone = try c.decodeIfPresent(Bool.self, forKey: .closeWhenDone) ?? d.closeWhenDone
+        exportMode = try c.decodeIfPresent(ExportMode.self, forKey: .exportMode) ?? d.exportMode
+        menuBarDrop = try c.decodeIfPresent(Bool.self, forKey: .menuBarDrop) ?? d.menuBarDrop
+        dropStartsImmediately = try c.decodeIfPresent(Bool.self, forKey: .dropStartsImmediately) ?? d.dropStartsImmediately
+        dragTarget = try c.decodeIfPresent(DragTarget.self, forKey: .dragTarget) ?? d.dragTarget
     }
 }

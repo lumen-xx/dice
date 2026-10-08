@@ -39,6 +39,8 @@ struct ImageItem: Identifiable {
     @Published var completed = 0
     /// Called when a run finishes with every image processed and saved.
     var onFinished: (() -> Void)?
+    /// Set by a menu bar drop: run with the current settings as soon as the dropped images are read.
+    var startWhenReady = false
     private var cancelRequested = false
     private var closeRequested = false
     let previewCache = PreviewCache()
@@ -46,6 +48,7 @@ struct ImageItem: Identifiable {
     init() {
         if let data = UserDefaults.standard.data(forKey: "dice.appPreferences"), let saved = try? JSONDecoder().decode(AppPreferences.self, from: data) { preferences = saved }
         if let data = UserDefaults.standard.data(forKey: "dice.options"), let saved = try? JSONDecoder().decode(Options.self, from: data) { options = saved }
+        Self.pruneClipboardFiles()
         session = FileManager.default.temporaryDirectory.appendingPathComponent("com.opyuii.dice/" + UUID().uuidString)
         try? FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
     }
@@ -114,6 +117,7 @@ struct ImageItem: Identifiable {
             importing = false
             if closeRequested { clear(); return }
             status = "\(items.count) image\(items.count == 1 ? "" : "s") ready"
+            if startWhenReady { startWhenReady = false; if !items.isEmpty { process() } }
         }
     }
     func remove(_ id: UUID) {
@@ -146,7 +150,8 @@ struct ImageItem: Identifiable {
     }
     func process() {
         guard !busy, !importing, !items.isEmpty else { return }
-        if preferences.useExportFolder && preferences.exportFolder.isEmpty { alert = "Choose a default export folder in Settings."; settingsPresented = true; return }
+        let clipboard = preferences.exportMode == .clipboard
+        if !clipboard && preferences.useExportFolder && preferences.exportFolder.isEmpty { alert = "Choose a default export folder in Settings."; settingsPresented = true; return }
         let exportDirectory = preferences.useExportFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
         var snapshot = options
         if preferences.alwaysStripMetadata { snapshot.stripMetadata = true }
@@ -176,14 +181,15 @@ struct ImageItem: Identifiable {
                 case .success(let output?):
                     items[index].result = output; items[index].error = nil
                     // PDFs, SVGs and multi-frame files produce one output per page, so they are never replaced in place.
-                    let replace = snapshot.replaceOriginals && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1
-                    let saved = await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
+                    let replace = snapshot.replaceOriginals && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1 && !clipboard
+                    let saved: Result<URL, Error>? = clipboard ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
                     var replacedHere = false
                     switch saved {
-                    case .success(let url):
+                    case nil: break
+                    case .success(let url)?:
                         items[index].savedURL = url
                         if replace { replacedHere = true; previewCache.remove(PreviewCache.key(input, page: page)); items[index].url = url; replaced += 1 }
-                    case .failure(let error): items[index].error = (replace ? "Processed, but could not replace the original: " : "Processed, but could not save the copy: ") + error.localizedDescription + (replace ? "" : " Use Dice → Save Copies As… to choose another folder.")
+                    case .failure(let error)?: items[index].error = (replace ? "Processed, but could not replace the original: " : "Processed, but could not save the copy: ") + error.localizedDescription + (replace ? "" : " Use Dice → Save Copies As… to choose another folder.")
                     }
                     let info = await Task.detached { try? Engine.inspect(output.previewURL ?? output.url) }.value
                     items[index].resultInfo = info
@@ -193,12 +199,46 @@ struct ImageItem: Identifiable {
                 items[index].rebuildSearch()
                 completed += 1
             }
+            var copied = 0
+            if clipboard && !cancelRequested && !closeRequested { copied = copyResultsToClipboard() }
             busy = false
             if closeRequested { clear(); return }
-            status = cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
+            status = clipboard && copied > 0 ? "Copied \(copied) image\(copied == 1 ? "" : "s") to the clipboard" : cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
             else if !cancelRequested { onFinished?() }
         }
+    }
+    /// Puts the processed images on the clipboard: image data for one still image, file URLs otherwise.
+    /// Files are copied out of the session folder first so a paste still works after Dice closes.
+    func copyResultsToClipboard() -> Int {
+        let outputs = results.compactMap { $0.result }
+        guard !outputs.isEmpty else { return 0 }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("com.opyuii.dice-clipboard/" + UUID().uuidString)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            var urls: [URL] = []
+            for output in outputs {
+                let target = Engine.uniqueURL(in: folder, stem: output.url.deletingPathExtension().lastPathComponent, ext: output.url.pathExtension)
+                try FileManager.default.copyItem(at: output.url, to: target); urls.append(target)
+            }
+            let pasteboard = NSPasteboard.general; pasteboard.clearContents()
+            if urls.count == 1, !outputs[0].isFolder, let image = NSImage(contentsOf: urls[0]) {
+                let item = NSPasteboardItem()
+                item.setString(urls[0].absoluteString, forType: .fileURL)
+                if let tiff = image.tiffRepresentation {
+                    item.setData(tiff, forType: .tiff)
+                    if let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) { item.setData(png, forType: .png) }
+                }
+                pasteboard.writeObjects([item])
+            } else { pasteboard.writeObjects(urls as [NSURL]) }
+            return urls.count
+        } catch { alert = "Could not copy to the clipboard: " + error.localizedDescription; return 0 }
+    }
+    /// Removes clipboard copies from earlier runs once they are a day old.
+    static func pruneClipboardFiles() {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("com.opyuii.dice-clipboard")
+        let entries = (try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for entry in entries where Date().timeIntervalSince((try? entry.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > 86_400 { try? FileManager.default.removeItem(at: entry) }
     }
     func cancel() { cancelRequested = true; status = "Finishing the current image…" }
     func save() {

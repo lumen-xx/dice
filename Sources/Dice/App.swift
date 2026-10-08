@@ -43,10 +43,18 @@ final class DiceWindow: NSWindow {
     var window: NSWindow?
     var statusItem: NSStatusItem?
     var statusMenu: NSMenu?
+    var dragWatcherCreated = false
+    lazy var dragWatcher: DragDropWatcher = {
+        let watcher = DragDropWatcher()
+        watcher.onDrop = { [weak self] urls in self?.dropOnMenuBar(urls) }
+        watcher.isAvailable = { [weak self] in !(self?.model.busy ?? true) && !(self?.model.importing ?? true) }
+        return watcher
+    }()
     var preferenceObserver: AnyCancellable?
     var isDevelopmentBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool == true }
     func applyPreferences(_ p: AppPreferences) {
         window?.level = p.stayOnTop ? .floating : .normal
+        if p.dragTarget != .off || dragWatcherCreated { dragWatcherCreated = true; dragWatcher.target = p.dragTarget }
         if p.showInMenuBar, statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             item.button?.image = NSImage(systemSymbolName: "die.face.5", accessibilityDescription: "Dice")
@@ -61,6 +69,14 @@ final class DiceWindow: NSWindow {
         } else if !p.showInMenuBar, let item = statusItem {
             NSStatusBar.system.removeStatusItem(item); statusItem = nil
         }
+        if let button = statusItem?.button {
+            let existing = button.subviews.compactMap { $0 as? StatusDropView }.first
+            if p.menuBarDrop, existing == nil {
+                let drop = StatusDropView(frame: button.bounds); drop.autoresizingMask = [.width, .height]
+                drop.onDrop = { [weak self] urls in self?.dropOnMenuBar(urls) }
+                button.addSubview(drop)
+            } else if !p.menuBarDrop { existing?.removeFromSuperview() }
+        }
         guard !isDevelopmentBuild else { return }
         let service = SMAppService.mainApp
         if p.startAtLogin, service.status != .enabled { try? service.register() }
@@ -73,6 +89,11 @@ final class DiceWindow: NSWindow {
             guard let item = statusItem, let menu = statusMenu else { return }
             item.menu = menu; item.button?.performClick(nil); item.menu = nil
         } else { showWindow() }
+    }
+    func dropOnMenuBar(_ urls: [URL]) {
+        guard !model.busy && !model.importing else { showWindow(); model.alert = "Finish the current images before opening another selection."; return }
+        model.startWhenReady = model.preferences.dropStartsImmediately
+        openImages(urls)
     }
     @objc func openFromMenu(_ sender: Any?) { showWindow() }
     /// Close the window once a run finishes; quit unless the menu bar item keeps Dice available.
@@ -133,4 +154,21 @@ final class DiceWindow: NSWindow {
     func windowWillClose(_ notification: Notification) { window = nil; model.closeSession(); NSApp.setActivationPolicy(.accessory) }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) { model.cleanup() }
+}
+
+/// Sits over the menu bar button to accept dropped files while passing clicks through to the button.
+final class StatusDropView: NSView {
+    var onDrop: ([URL]) -> Void = { _ in }
+    override init(frame: NSRect) { super.init(frame: frame); registerForDraggedTypes([.fileURL]) }
+    required init?(coder: NSCoder) { fatalError() }
+    override func mouseDown(with event: NSEvent) { nextResponder?.mouseDown(with: event) }
+    override func rightMouseDown(with event: NSEvent) { nextResponder?.rightMouseDown(with: event) }
+    override func mouseUp(with event: NSEvent) { nextResponder?.mouseUp(with: event) }
+    override func rightMouseUp(with event: NSEvent) { nextResponder?.rightMouseUp(with: event) }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        guard !urls.isEmpty else { return false }
+        onDrop(urls); return true
+    }
 }

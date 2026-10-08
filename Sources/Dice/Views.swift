@@ -134,7 +134,8 @@ struct DiceView: View {
                     .popover(isPresented: $imageSettingsPresented, arrowEdge: .top) { imageSettingsPanel }
             }
             if !model.settingsPresented {
-            icon("play.fill", "Start with current settings") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
+            icon("play.fill", "Start with current settings (right-click for export options)") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
+                .contextMenu { exportMenu }
             }
         }
         .buttonStyle(.plain)
@@ -174,6 +175,20 @@ struct DiceView: View {
         Button("Move Original to Trash") { model.trashOriginal(id) }.disabled(model.busy || model.importing)
         if let item = model.items.first(where: { $0.id == id }) { Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.savedURL ?? item.url]) } }
     }
+    /// Right-click menu on the start icon: where results go, and whether originals are replaced.
+    @ViewBuilder var exportMenu: some View {
+        ForEach(ExportMode.allCases) { mode in
+            Button { model.preferences.exportMode = mode } label: { Text(mode.rawValue); if model.preferences.exportMode == mode { Image(systemName: "checkmark") } }
+        }
+        Divider()
+        Button { model.preferences.useExportFolder = false } label: { Text("Save beside originals"); if !model.preferences.useExportFolder { Image(systemName: "checkmark") } }
+        Button { if model.preferences.exportFolder.isEmpty { model.chooseExportFolder() } else { model.preferences.useExportFolder = true } } label: {
+            Text(model.preferences.exportFolder.isEmpty ? "Save to a folder…" : "Save to \(URL(fileURLWithPath: model.preferences.exportFolder).lastPathComponent)"); if model.preferences.useExportFolder { Image(systemName: "checkmark") } }
+        Button("Choose Export Folder…") { model.chooseExportFolder() }
+        Divider()
+        Button { model.options.replaceOriginals.toggle() } label: { Text("Replace originals"); if model.options.replaceOriginals { Image(systemName: "checkmark") } }
+            .disabled(model.preferences.exportMode == .clipboard)
+    }
     var flattenColor: Binding<Color> {
         Binding(get: { let c = model.preferences.flattenColor + [1, 1, 1]; return Color(.sRGB, red: c[0], green: c[1], blue: c[2]) },
                 set: { if let c = NSColor($0).usingColorSpace(.sRGB) { model.preferences.flattenColor = [Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent)] } })
@@ -181,7 +196,8 @@ struct DiceView: View {
     var appSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Export defaults").font(DiceStyle.heading)
-            Toggle("Default export folder", isOn: $model.preferences.useExportFolder)
+            Picker("When finished", selection: $model.preferences.exportMode) { ForEach(ExportMode.allCases) { Text($0.rawValue).tag($0) } }
+            Toggle("Default export folder", isOn: $model.preferences.useExportFolder).disabled(model.preferences.exportMode == .clipboard)
             HStack {
                 Text(model.preferences.exportFolder.isEmpty ? "Beside originals" : model.preferences.exportFolder).font(DiceStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 Spacer()
@@ -217,6 +233,9 @@ struct DiceView: View {
             Text("General").font(DiceStyle.heading)
             Toggle("Start at login", isOn: $model.preferences.startAtLogin)
             Toggle("Show in menu bar", isOn: $model.preferences.showInMenuBar)
+            Toggle("Drop images on the menu bar icon", isOn: $model.preferences.menuBarDrop).disabled(!model.preferences.showInMenuBar)
+            Picker("Drag files to reveal a drop target", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }
+            Toggle("Start right after a drop", isOn: $model.preferences.dropStartsImmediately).disabled(!(model.preferences.showInMenuBar && model.preferences.menuBarDrop) && model.preferences.dragTarget == .off)
             Toggle("Stay on top of other apps", isOn: $model.preferences.stayOnTop)
             Divider().padding(.vertical, 4)
             Text("Updates").font(DiceStyle.heading)
