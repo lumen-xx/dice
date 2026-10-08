@@ -9,6 +9,9 @@ VERSION = json.loads((ROOT / 'updates/version.json').read_text())
 def call(*args): return subprocess.check_output(args, text=True).strip()
 def run(*args): subprocess.run(args, check=True)
 def prepare_tools(destination):
+    renderer = BUILD / 'vendor/resvg/bin/resvg'
+    if not renderer.exists() or call(str(renderer), '--version') != '0.48.1':
+        raise SystemExit('Build the pinned SVG renderer: cargo install resvg --version 0.48.1 --locked --root build/vendor/resvg')
     exifprefix = pathlib.Path(call('brew', '--prefix', 'exiftool'))
     webpprefix = pathlib.Path(call('brew', '--prefix', 'webp'))
     webpversion = call(str(webpprefix / 'bin/cwebp'), '-version')
@@ -16,6 +19,8 @@ def prepare_tools(destination):
     version = call(str(exifprefix / 'bin/exiftool'), '-ver')
     if version != '13.50': raise SystemExit('This preview pins ExifTool 13.50. Update the pin deliberately before using another version.')
     destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(renderer, destination / 'resvg')
+    run('codesign', '--force', '--sign', '-', str(destination / 'resvg'))
     exif = destination / 'exiftool'; exif.mkdir(exist_ok=True)
     script = (exifprefix / 'bin/exiftool').read_text()
     script = '\n'.join(line for line in script.split('\n') if not (line.startswith('unshift @INC,') and '/opt/homebrew/' in line))
@@ -50,7 +55,7 @@ def prepare_tools(destination):
     binary.chmod(0o755); bundle(binary)
     for file in list(dylibs.glob('*.dylib')) + [binary]: run('codesign', '--force', '--sign', '-', str(file))
     shutil.copytree(ROOT / 'vendor/licenses', destination / 'Licenses', dirs_exist_ok=True)
-    (destination / 'versions.txt').write_text('ExifTool 13.50\n' + call(str(binary), '-version') + '\n')
+    (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\n' + call(str(binary), '-version') + '\n')
 
 if __name__ == '__main__':
     run('swift', 'build', '-c', 'release', '--package-path', str(ROOT))
@@ -67,7 +72,13 @@ if __name__ == '__main__':
     shutil.copy2(binpath / 'Dice', contents / 'MacOS/Dice')
     prepare_tools(resources / 'Tools')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', resources)
-    plist = dict(CFBundleExecutable='Dice', CFBundleIdentifier='com.opyuii.dice', CFBundleName='Dice', CFBundleDisplayName='Dice', CFBundlePackageType='APPL', CFBundleShortVersionString=VERSION['version'], CFBundleVersion=str(VERSION['build']), LSMinimumSystemVersion='14.0', LSUIElement=True, NSHighResolutionCapable=True, CFBundleIconFile='Dice', CFBundleDocumentTypes=[dict(CFBundleTypeName='Image', CFBundleTypeRole='Viewer', LSItemContentTypes=['public.image'], LSHandlerRank='Alternate')], SUFeedURL=UPDATE_CONFIG['feed_url'], SUPublicEDKey=UPDATE_CONFIG['public_key'], SUEnableAutomaticChecks=False, SUAutomaticallyUpdate=False, SUEnableSystemProfiling=False, SUVerifyUpdateBeforeExtraction=True, SURequireSignedFeed=True, SUSignedFeedFailureExpirationInterval=0)
+    plist = dict(CFBundleExecutable='Dice', CFBundleIdentifier='com.opyuii.dice', CFBundleName='Dice', CFBundleDisplayName='Dice', CFBundlePackageType='APPL', CFBundleShortVersionString=VERSION['version'], CFBundleVersion=str(VERSION['build']), LSMinimumSystemVersion='14.0', LSUIElement=True, NSHighResolutionCapable=True, CFBundleIconFile='Dice', CFBundleDocumentTypes=[dict(CFBundleTypeName='Image', CFBundleTypeRole='Viewer', LSItemContentTypes=['public.image', 'public.svg-image', 'com.adobe.pdf'], LSHandlerRank='Alternate')], SUFeedURL=UPDATE_CONFIG['feed_url'], SUPublicEDKey=UPDATE_CONFIG['public_key'], SUEnableAutomaticChecks=False, SUAutomaticallyUpdate=False, SUEnableSystemProfiling=False, SUVerifyUpdateBeforeExtraction=True, SURequireSignedFeed=True, SUSignedFeedFailureExpirationInterval=0)
+    plist['NSServices'] = [dict(
+        NSMenuItem={'default': 'Edit with Dice'}, NSMessage='editWithDice', NSPortName='Dice',
+        NSSendTypes=['public.file-url', 'NSFilenamesPboardType'],
+        NSSendFileTypes=['public.image', 'public.svg-image', 'com.adobe.pdf'],
+        NSRequiredContext={'NSServiceApplicationIdentifier': 'com.apple.finder'}
+    )]
     (contents / 'Info.plist').write_bytes(plistlib.dumps(plist))
     run('swift', str(ROOT / 'scripts/icon.swift'), str(BUILD))
     run('iconutil', '-c', 'icns', str(BUILD / 'Dice.iconset'), '-o', str(resources / 'Dice.icns'))

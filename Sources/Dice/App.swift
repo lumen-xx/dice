@@ -12,6 +12,11 @@ import AppKit
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         let menu = NSMenu(); let root = NSMenuItem(); let applicationMenu = NSMenu()
+        let settings = NSMenuItem(title: "Settings…", action: #selector(DiceDelegate.showSettings(_:)), keyEquivalent: ",")
+        settings.target = delegate; applicationMenu.addItem(settings)
+        let save = NSMenuItem(title: "Save Copies As…", action: #selector(DiceDelegate.saveCopies(_:)), keyEquivalent: "s")
+        save.keyEquivalentModifierMask = [.command, .shift]; save.target = delegate
+        applicationMenu.addItem(save); applicationMenu.addItem(.separator())
         let updates = NSMenuItem(title: "Check for Updates…", action: #selector(DiceDelegate.checkForUpdates(_:)), keyEquivalent: "")
         updates.target = delegate; applicationMenu.addItem(updates)
         let previews = NSMenuItem(title: "Include Preview Releases", action: #selector(DiceDelegate.togglePreviewUpdates(_:)), keyEquivalent: "")
@@ -34,7 +39,9 @@ final class DiceWindow: NSWindow {
     let model = DiceModel()
     lazy var updates = DiceUpdates(model: model)
     var window: NSWindow?
-    func applicationDidFinishLaunching(_ notification: Notification) { updates.start(); showWindow() }
+    func applicationDidFinishLaunching(_ notification: Notification) { NSApp.servicesProvider = self; NSUpdateDynamicServices(); updates.start(); showWindow() }
+    @objc func showSettings(_ sender: Any?) { showWindow(); model.settingsPresented = true }
+    @objc func saveCopies(_ sender: Any?) { model.save() }
     @objc func checkForUpdates(_ sender: Any?) { showWindow(); updates.check(sender) }
     @objc func togglePreviewUpdates(_ sender: NSMenuItem) { updates.includePreviews.toggle(); sender.state = updates.includePreviews ? .on : .off }
     // Finder launches should reveal Dice's drop surface, never the default document picker.
@@ -50,7 +57,7 @@ final class DiceWindow: NSWindow {
             w.collectionBehavior.insert(.fullScreenNone)
             let effect = NSVisualEffectView(); effect.material = .hudWindow; effect.blendingMode = .behindWindow; effect.state = .active
             effect.wantsLayer = true; effect.layer?.cornerRadius = DiceStyle.cornerRadius; effect.layer?.masksToBounds = true
-            let hosting = NSHostingView(rootView: DiceView(model: model, close: { [weak w] in w?.close() })); hosting.translatesAutoresizingMaskIntoConstraints = false
+            let hosting = DiceHostingView(rootView: DiceView(model: model, close: { [weak w] in w?.close() }, checkUpdates: { [weak self] in self?.updates.check(nil) })); hosting.translatesAutoresizingMaskIntoConstraints = false
             effect.addSubview(hosting)
             NSLayoutConstraint.activate([hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor), hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor), hosting.topAnchor.constraint(equalTo: effect.topAnchor), hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor)])
             w.contentView = effect; w.center(); window = w
@@ -60,6 +67,17 @@ final class DiceWindow: NSWindow {
     }
     func application(_ sender: NSApplication, open urls: [URL]) { openImages(urls) }
     func application(_ sender: NSApplication, openFiles filenames: [String]) { openImages(filenames.map { URL(fileURLWithPath: $0) }); sender.reply(toOpenOrPrint: .success) }
+    @objc func editWithDice(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        var urls = (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        if urls.isEmpty, let paths = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+            urls = paths.map { URL(fileURLWithPath: $0) }
+        }
+        guard !urls.isEmpty else { error.pointee = "Select an image or PDF to edit with Dice."; return }
+        guard !model.busy && !model.importing else {
+            showWindow(); error.pointee = "Finish the current images before opening another selection."; return
+        }
+        openImages(urls)
+    }
     func openImages(_ urls: [URL]) {
         guard !model.busy && !model.importing else { showWindow(); model.alert = "Finish the current images before opening another selection."; return }
         model.clear(); showWindow(); model.add(urls)

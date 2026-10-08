@@ -33,7 +33,7 @@ Avoid one-off font sizes in new UI. Text follows system light/dark appearance an
 
 Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. Toolbar symbol targets are 30 × 30 pt; root corners are 14 pt. The top-left close button matches the capsule material and dimensions of the top-right toolbar. There is no native title bar or traffic-light strip; the image surface and drag glow cover the entire window. Minimize and fullscreen are disabled.
 
-The top-right toolbar carries Add, Metadata, Settings, Save and Start. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard.
+The top-right toolbar carries Add, Metadata, Settings and Start. Start saves copies automatically. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard.
 
 Use restrained transitions and honour Reduce Motion. Avoid idle animation. Search is local and matches filename/path, image properties, tag names/values and recognised text. Removing a batch entry never deletes the original file.
 
@@ -42,3 +42,7 @@ Launching from Finder or Applications reveals the drop surface. Only an explicit
 The metadata view uses an unboxed navigation header and flat name/value rows. Show each group name once as a quiet section label. Search has a single subtle background; the group filter stays neutral. Select a row to reveal its full, selectable value in place. Avoid table chrome and alternating filled rows.
 
 Search begins 12 points below the navigation header. The shared footer aligns image counts or resolution/format/size on the left with paging on the right. Metadata rows have a trailing copy-value button with a 30-point target.
+
+Settings is a view inside the same window, opened with the sliders or Command-comma. Its Back action returns to the image. Window edges use directional resize cursors, with diagonal corners. Paging reuses bounded decoded previews; metadata comes from the session cache.
+
+App Settings share the editor surface and use Export defaults, Image settings and Updates sections. Folder and format defaults each have an explicit enable switch; update checks are opt-in. Scroll settings inside the window, keeping Back and the close control visible.

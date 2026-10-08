@@ -7,3 +7,5 @@ Dice bundles cwebp 1.6.0 and its dependencies from Homebrew for this development
 Apple frameworks and the system Perl runtime are provided by macOS, rather than distributed with Dice.
 
 Dice bundles Sparkle 2.10.0 for signed software updates, under its MIT license and included third-party notices. Source: https://github.com/sparkle-project/Sparkle. The complete license is shipped as `Contents/Resources/Sparkle-LICENSE.txt`.
+
+Dice bundles the resvg 0.48.1 static SVG renderer (MPL-2.0), built from the pinned crates.io release using its lockfile. Source: https://github.com/linebender/resvg/tree/v0.48.1. License texts and dependency notices are included in `Tools/Licenses/resvg`. Dice uses unmodified upstream code; no renderer source modifications are distributed.

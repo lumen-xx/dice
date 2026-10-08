@@ -1,3 +1,19 @@
+# v0.1.8 validation — 2026-10-08
+
+The release build compiles, passes deep strict bundle signature verification, and stays below 40 MB: approximately 31.5 MB installed / 10.1 MB zipped. The bundled resvg 0.48.1 renderer runs only on demand; dependency license texts are shipped.
+
+All 20 standalone checks pass. New coverage exercises SVG alpha, JPEG flattening and viewBox sizing; PDF page extraction, rotation and full-page raster scaling; GIF/BMP/TIFF/AVIF round trips; GIF/TIFF frame extraction; resolution-only downsizing with metadata retained and smaller inputs skipped; automatic saving beside originals or to a configured folder without overwriting; and preview budget/eviction/page isolation. RAW support uses the available macOS decoders and was not checked against a camera-file corpus. AVIF encoding is confirmed on this Mac and remains dependent on macOS encoder availability.
+
+Native review verified SVG/PDF imports, separately named PDF pages, correct second-page rendering, instant cached paging without a loader, and automatic saving through Start. Resolution-only resize saved two PDF pages at 500 × 333 and skipped the 300 × 200 SVG. Command-comma opens Settings inside the Dice window, with Back; it was also checked from metadata before the final move into the window. Native horizontal/vertical/diagonal cursor rectangles and edge-drag handling compile; the cursor's exact appearance could not be confirmed with the available cropped native screenshot controls.
+
+Native app settings review verified folder selection, independent default-format and folder switches, the automatic-update switch, and preference persistence after quitting/reopening the isolated review build. Automatic-check scheduling is wired to Sparkle but its delayed network check was not timed in this review.
+
+A generated 2400 × 1600 JPEG, displayed at a 1200-pixel longest edge, averaged 73.265 ms per decode over 8 decodes versus approximately 0.0002 ms per cached retrieval over 1000 lookups. This measures engine/cache work, not full UI latency. The cache enforces a 32 MiB pixel-data budget; batch thumbnails and the active view are additional memory. Imports reuse the OCR-sized decode for previews and create the thumbnail from it instead of decoding each input twice. Metadata is reused during paging. Reprocessing has a new preview generation to avoid reusing stale result pixels.
+
+A visible three-entry review session after processing sampled 0.0% CPU and about 149 MiB resident memory. This is one idle snapshot, not a benchmark or zero-resource claim. Larger batches may evict previews and decode them again, showing their thumbnail while loading. Closing the session clears cached previews. Previous signed public update validation is recorded below.
+
+---
+
 # v0.1.7 validation — 2026-10-08
 
 Release build and deep strict bundle signature verification pass. Size: 26.23 MB installed / 7.80 MB zipped. All 11 processing/search checks pass.

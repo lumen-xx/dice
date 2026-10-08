@@ -2,6 +2,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 import CoreGraphics
+import PDFKit
 import DiceCore
 
 
@@ -142,6 +143,167 @@ final class EngineTests {
         XCTAssertFalse(ImageSearch.matches("atlas absent",text:text))
         XCTAssertTrue(ImageSearch.matches("",text:text))
     }
+    func rgba(_ image: CGImage, x: Int, y: Int) -> [UInt8] {
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        let offset = (y * image.width + x) * 4
+        return Array(pixels[offset..<(offset + 4)])
+    }
+    func testSVGRenderingAndTransparency() throws {
+        let input = directory.appendingPathComponent("vector ü.svg")
+        let data = Data("<svg xmlns='http://www.w3.org/2000/svg' width='120' height='80'><rect x='20' y='20' width='40' height='40' fill='#ff0000'/></svg>".utf8)
+        try data.write(to: input)
+        let info = try Engine.inspect(input)
+        XCTAssertEqual(info.width, 120); XCTAssertEqual(info.height, 80)
+        let output = try Engine.convert(input, options: Options(), directory: directory)
+        XCTAssertEqual(output.url.pathExtension, "png")
+        let image = try Engine.previewImage(output.url, maxPixelSize: 120)
+        XCTAssertEqual(rgba(image, x: 0, y: 0)[3], 0)
+        XCTAssertTrue(rgba(image, x: 40, y: 40)[0] > 240)
+        var options = Options(); options.format = .jpeg; options.resize = .edge; options.edge = 60
+        let jpeg = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertEqual(dimensions(jpeg.url).0, 60); XCTAssertEqual(dimensions(jpeg.url).1, 40)
+        let flattened = try Engine.previewImage(jpeg.url, maxPixelSize: 60)
+        XCTAssertTrue(rgba(flattened, x: 0, y: 0)[0] > 240)
+        XCTAssertEqual(try Data(contentsOf: input), data)
+        options.metadataOnly = true
+        XCTAssertThrowsError(try Engine.convert(input, options: options, directory: directory))
+    }
+    func testSVGViewBoxAndInvalidInput() throws {
+        let input = directory.appendingPathComponent("viewbox.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 150'><circle cx='150' cy='75' r='50' fill='blue'/></svg>".utf8).write(to: input)
+        let output = try Engine.convert(input, options: Options(), directory: directory)
+        XCTAssertEqual(dimensions(output.url).0, 300); XCTAssertEqual(dimensions(output.url).1, 150)
+        try Data("<html/>".utf8).write(to: input)
+        XCTAssertThrowsError(try Engine.inspect(input))
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='999999999' height='999999999'/>".utf8).write(to: input)
+        XCTAssertThrowsError(try Engine.inspect(input))
+    }
+    func pdfFixture() throws -> URL {
+        let url = directory.appendingPathComponent("two pages.pdf")
+        var box = CGRect(x: 0, y: 0, width: 100, height: 60)
+        let context = CGContext(url as CFURL, mediaBox: &box, nil)!
+        for color in [CGColor(red: 1, green: 0, blue: 0, alpha: 1), CGColor(red: 0, green: 0, blue: 1, alpha: 1)] {
+            context.beginPDFPage(nil); context.setFillColor(color); context.fill(box); context.endPDFPage()
+        }
+        context.closePDF()
+        return url
+    }
+    func testPDFAllPagesAndRotation() throws {
+        let input = try pdfFixture()
+        let original = try Data(contentsOf: input)
+        XCTAssertEqual(try Engine.pageCount(input), 2)
+        let first = try Engine.convert(input, options: Options(), directory: directory, page: 1)
+        let second = try Engine.convert(input, options: Options(), directory: directory, page: 2)
+        XCTAssertTrue(first.url.lastPathComponent.contains("page-1")); XCTAssertTrue(second.url.lastPathComponent.contains("page-2"))
+        XCTAssertEqual(dimensions(first.url).0, 200); XCTAssertEqual(dimensions(first.url).1, 120)
+        XCTAssertTrue(rgba(try Engine.previewImage(first.url, maxPixelSize: 200), x: 50, y: 50)[0] > 240)
+        XCTAssertTrue(rgba(try Engine.previewImage(second.url, maxPixelSize: 200), x: 50, y: 50)[2] > 240)
+        XCTAssertTrue(rgba(try Engine.previewImage(first.url, maxPixelSize: 200), x: 10, y: 10)[1] < 180)
+        XCTAssertTrue(rgba(try Engine.previewImage(second.url, maxPixelSize: 200), x: 190, y: 110)[0] < 180)
+        XCTAssertEqual(try Data(contentsOf: input), original)
+        XCTAssertThrowsError(try Engine.convert(input, options: Options(), directory: directory, page: 3))
+        let pdf = PDFDocument(url: input)!; pdf.page(at: 1)!.rotation = 90; XCTAssertTrue(pdf.write(to: input))
+        let rotated = try Engine.convert(input, options: Options(), directory: directory, page: 2)
+        XCTAssertEqual(dimensions(rotated.url).0, 120); XCTAssertEqual(dimensions(rotated.url).1, 200)
+        var options = Options(); options.metadataOnly = true
+        XCTAssertThrowsError(try Engine.convert(input, options: options, directory: directory))
+    }
+    func testAdditionalStillFormats() throws {
+        let input = try fixture(format: UTType.png.identifier)
+        for format in [OutputFormat.gif, .bmp, .tiff, .avif] {
+            if !Engine.canEncode(format) { print("SKIP encoder unavailable: \(format.rawValue)"); continue }
+            var options = Options(); options.format = format
+            let output = try Engine.convert(input, options: options, directory: directory)
+            XCTAssertEqual(dimensions(output.url).0, 120); XCTAssertEqual(dimensions(output.url).1, 80)
+            XCTAssertEqual(try Engine.inspect(output.url).type, format.type)
+            options.format = .png
+            let roundTrip = try Engine.convert(output.url, options: options, directory: directory)
+            XCTAssertEqual(dimensions(roundTrip.url).0, 120)
+        }
+    }
+    func testGIFAndTIFFFrameExtraction() throws {
+        let red = directory.appendingPathComponent("red.svg"), blue = directory.appendingPathComponent("blue.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='red'/></svg>".utf8).write(to: red)
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='blue'/></svg>".utf8).write(to: blue)
+        let images = [try Engine.previewImage(red, maxPixelSize: 80), try Engine.previewImage(blue, maxPixelSize: 80)]
+        for format in [OutputFormat.gif, .tiff] {
+            let input = directory.appendingPathComponent("multiple." + format.ext)
+            let dest = CGImageDestinationCreateWithURL(input as CFURL, format.type as CFString, 2, nil)!
+            for image in images { CGImageDestinationAddImage(dest, image, nil) }
+            XCTAssertTrue(CGImageDestinationFinalize(dest))
+            XCTAssertEqual(try Engine.pageCount(input), 2)
+            var options = Options(); options.format = .png
+            let first = try Engine.convert(input, options: options, directory: directory, page: 1)
+            let second = try Engine.convert(input, options: options, directory: directory, page: 2)
+            XCTAssertTrue(rgba(try Engine.previewImage(first.url, maxPixelSize: 80), x: 20, y: 20)[0] > 240)
+            XCTAssertTrue(rgba(try Engine.previewImage(second.url, maxPixelSize: 80), x: 20, y: 20)[2] > 240)
+            XCTAssertFalse(first.url == second.url)
+        }
+    }
+    func testResizeOnlySkipsSmallAndPreservesMetadata() throws {
+        let input = try fixture(format: UTType.png.identifier)
+        _ = try runExif(["-overwrite_original", "-Artist=Keep for resize", input.path])
+        let original = try Data(contentsOf: input)
+        var options = Options(); options.resize = .edge; options.edge = 200
+        options.format = .jpeg; options.quality = 0.1; options.stripMetadata = true
+        XCTAssertNil(try Engine.resize(input, options: options, directory: directory))
+        options.edge = 60
+        let output = try Engine.resize(input, options: options, directory: directory)!
+        XCTAssertEqual(output.url.pathExtension, "png")
+        XCTAssertEqual(dimensions(output.url).0, 60); XCTAssertEqual(dimensions(output.url).1, 40)
+        XCTAssertEqual(try Engine.inspect(output.url).value("Artist"), "Keep for resize")
+        XCTAssertEqual(try Data(contentsOf: input), original)
+    }
+    func testSaveCopiesBesideOriginal() throws {
+        let input = try fixture(format: UTType.png.identifier)
+        let original = try Data(contentsOf: input)
+        let temporary = directory.appendingPathComponent("processing")
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        let result = try Engine.convert(input, options: Options(), directory: temporary)
+        let first = try Engine.saveCopy(result, beside: input)
+        let second = try Engine.saveCopy(result, beside: input)
+        XCTAssertEqual(first.deletingLastPathComponent(), input.deletingLastPathComponent())
+        XCTAssertFalse(first == second); XCTAssertFalse(first == input)
+        XCTAssertEqual(try Data(contentsOf: first), try Data(contentsOf: result.url))
+        let export = directory.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        let configured = try Engine.saveCopy(result, beside: input, directory: export)
+        XCTAssertEqual(configured.deletingLastPathComponent().path, export.path)
+        XCTAssertEqual(try Data(contentsOf: configured), try Data(contentsOf: result.url))
+        XCTAssertEqual(try Data(contentsOf: input), original)
+    }
+    func testPreviewBudgetAndPageKeys() throws {
+        let input = try fixture(width: 120, height: 80, format: UTType.png.identifier)
+        let image = try Engine.previewImage(input, maxPixelSize: 120)
+        let cache = PreviewCache(limit: image.bytesPerRow * image.height * 2)
+        let first = PreviewCache.key(input, page: 1), second = PreviewCache.key(input, page: 2), third = PreviewCache.key(input, page: 3)
+        cache.insert(image, for: first); cache.insert(image, for: second)
+        XCTAssertTrue(cache.image(for: first) != nil)
+        cache.insert(image, for: third)
+        XCTAssertNil(cache.image(for: second)); XCTAssertTrue(cache.image(for: first) != nil)
+        XCTAssertTrue(cache.statistics.bytes <= cache.limit)
+        cache.remove(first); XCTAssertNil(cache.image(for: first))
+        cache.clear(); XCTAssertEqual(cache.statistics.bytes, 0)
+    }
+    func testPreviewPerformance() throws {
+        let photo = try fixture(width: 2400, height: 1600)
+        let cache = PreviewCache()
+        let key = PreviewCache.key(photo)
+        let start = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<8 { _ = try Engine.previewImage(photo, maxPixelSize: 1200) }
+        let cold = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000 / 8
+        cache.insert(try Engine.previewImage(photo, maxPixelSize: 1200), for: key)
+        let warmStart = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<1000 { XCTAssertTrue(cache.image(for: key) != nil) }
+        let warm = Double(DispatchTime.now().uptimeNanoseconds - warmStart) / 1_000_000 / 1000
+        print(String(format: "PERF JPEG preview: decode %.3f ms; cached retrieval %.4f ms; %.2f MiB cached", cold, warm, Double(cache.statistics.bytes) / 1048576))
+        XCTAssertEqual(cache.statistics.hits, 1000)
+        XCTAssertTrue(cache.statistics.bytes <= cache.limit)
+    }
     func testCollisionSafeNames() throws {
         let first = directory.appendingPathComponent("photo-dice.jpg")
         try Data().write(to: first)
@@ -163,6 +325,15 @@ final class EngineTests {
             ("HEIC, lossless and same-format WebP", suite.testHEICAndLosslessWebP),
             ("unsupported metadata-only rejection", suite.testTIFFMetadataOnly),
             ("search across metadata, dimensions and image text", suite.testImageSearchAcrossMetadataAndText),
+            ("SVG rendering, transparency and resizing", suite.testSVGRenderingAndTransparency),
+            ("SVG viewBox and invalid input", suite.testSVGViewBoxAndInvalidInput),
+            ("PDF pages, dimensions and rotation", suite.testPDFAllPagesAndRotation),
+            ("GIF, BMP, TIFF and AVIF round trips", suite.testAdditionalStillFormats),
+            ("GIF and TIFF frame extraction", suite.testGIFAndTIFFFrameExtraction),
+            ("resolution-only resize and smaller-image skipping", suite.testResizeOnlySkipsSmallAndPreservesMetadata),
+            ("automatic save location and original preservation", suite.testSaveCopiesBesideOriginal),
+            ("preview memory budget, eviction and page keys", suite.testPreviewBudgetAndPageKeys),
+            ("preview decode and cache performance", suite.testPreviewPerformance),
             ("filename collisions", suite.testCollisionSafeNames)
         ]
         for (name, check) in checks {
