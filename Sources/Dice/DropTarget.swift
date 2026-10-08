@@ -96,6 +96,7 @@ final class DropTargetView: NSVisualEffectView {
         tint.backgroundColor = NSColor.clear.cgColor; layer?.addSublayer(tint)
         dashes.fillColor = nil; dashes.lineWidth = 1.5; dashes.lineDashPattern = [5, 5]; dashes.lineCap = .round
         dashes.strokeColor = NSColor.white.withAlphaComponent(0.35).cgColor; layer?.addSublayer(dashes)
+        icon.isEditable = false; icon.unregisterDraggedTypes()
         icon.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
         icon.symbolConfiguration = .init(pointSize: 34, weight: .light)
         icon.contentTintColor = .labelColor
@@ -109,6 +110,8 @@ final class DropTargetView: NSVisualEffectView {
         registerForDraggedTypes([.fileURL])
     }
     required init?(coder: NSCoder) { fatalError() }
+    /// Child views (the image view in particular) would otherwise take over the drag and refuse the drop.
+    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
     override func layout() {
         super.layout()
         tint.frame = bounds
