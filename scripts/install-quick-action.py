@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Install the image-only Finder Quick Action for this development checkout."""
-import pathlib, plistlib, shlex, subprocess, uuid
+import pathlib, plistlib, shlex, subprocess, uuid, argparse
 root = pathlib.Path(__file__).resolve().parent.parent
-app = root / 'build/Dice.app'
+parser = argparse.ArgumentParser()
+parser.add_argument('--app', type=pathlib.Path)
+parser.add_argument('--update', action='store_true')
+args = parser.parse_args()
+app = args.app or (pathlib.Path('/Applications/Dice.app') if pathlib.Path('/Applications/Dice.app').exists() else root / 'build/Dice.app')
 if not app.exists(): raise SystemExit('Build Dice first: python3 scripts/package.py')
 workflow = pathlib.Path.home() / 'Library/Services/Edit with Dice.workflow'
 contents = workflow / 'Contents'
-if workflow.exists(): raise SystemExit('Edit with Dice already exists. Inspect it before replacing it.')
-contents.mkdir(parents=True)
+if workflow.exists():
+    previous = plistlib.loads((contents / 'document.wflow').read_bytes())
+    old = previous.get('actions', [{}])[0].get('action', {}).get('ActionParameters', {}).get('COMMAND_STRING', '')
+    allowed = ['/usr/bin/open -a ' + shlex.quote(str(candidate)) + ' "$@"' for candidate in [root / 'build/Dice.app', pathlib.Path('/Applications/Dice.app')]]
+    if not args.update or old not in allowed: raise SystemExit('Existing Quick Action was not replaced. Use --update only for Dice-generated actions.')
+contents.mkdir(parents=True, exist_ok=True)
 shell = '/usr/bin/open -a ' + shlex.quote(str(app)) + ' "$@"'
 params = dict(COMMAND_STRING=shell, source=shell, inputMethod=1, shell='/bin/sh', CheckedForUserDefaultShell=True)
 action = {

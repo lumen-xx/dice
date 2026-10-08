@@ -129,6 +129,19 @@ final class EngineTests {
         XCTAssertThrowsError(try Engine.convert(input, options: options, directory: directory))
         XCTAssertEqual(try Engine.inspect(input).value("Artist"),"Remove me")
     }
+    func testImageSearchAcrossMetadataAndText() throws {
+        let input = try fixture(name: "Photo café", width: 120, height: 80)
+        _ = try runExif(["-overwrite_original", "-Artist=Quiet Atlas", "-Model=Test Camera", input.path])
+        let info = try Engine.inspect(input)
+        let text = ImageSearch.text(filename: input.lastPathComponent, path: input.path, info: info, recognizedText: "Moon Lantern")
+        XCTAssertTrue(ImageSearch.matches("CAFE",text:text))
+        XCTAssertTrue(ImageSearch.matches("Artist atlas",text:text))
+        XCTAssertTrue(ImageSearch.matches("camera lantern",text:text))
+        XCTAssertTrue(ImageSearch.matches("120×80",text:text))
+        XCTAssertTrue(ImageSearch.matches("moon",text:text))
+        XCTAssertFalse(ImageSearch.matches("atlas absent",text:text))
+        XCTAssertTrue(ImageSearch.matches("",text:text))
+    }
     func testCollisionSafeNames() throws {
         let first = directory.appendingPathComponent("photo-dice.jpg")
         try Data().write(to: first)
@@ -149,6 +162,7 @@ final class EngineTests {
             ("metadata preservation", suite.testPreserveMetadata),
             ("HEIC, lossless and same-format WebP", suite.testHEICAndLosslessWebP),
             ("unsupported metadata-only rejection", suite.testTIFFMetadataOnly),
+            ("search across metadata, dimensions and image text", suite.testImageSearchAcrossMetadataAndText),
             ("filename collisions", suite.testCollisionSafeNames)
         ]
         for (name, check) in checks {

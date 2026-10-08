@@ -14,24 +14,38 @@ import AppKit
         withExtendedLifetime(delegate) {}
     }
 }
+final class DiceWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+    override func miniaturize(_ sender: Any?) {}
+    override func performMiniaturize(_ sender: Any?) {}
+    override func toggleFullScreen(_ sender: Any?) {}
+}
 @MainActor final class DiceDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model = DiceModel()
     var window: NSWindow?
-    func applicationDidFinishLaunching(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
+    func applicationDidFinishLaunching(_ notification: Notification) { showWindow() }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func showWindow() {
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 390), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+            let w = DiceWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 460), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.title = "Dice"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.isOpaque = false; w.backgroundColor = .clear
             w.isMovableByWindowBackground = true; w.delegate = self
-            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(type)?.isHidden = true }
+            w.collectionBehavior.insert(.fullScreenNone)
+            w.standardWindowButton(.closeButton)?.isHidden = false
+            for type in [NSWindow.ButtonType.miniaturizeButton, .zoomButton] {
+                w.standardWindowButton(type)?.isHidden = false
+                w.standardWindowButton(type)?.isEnabled = false
+            }
             let effect = NSVisualEffectView(); effect.material = .hudWindow; effect.blendingMode = .behindWindow; effect.state = .active
-            effect.wantsLayer = true; effect.layer?.cornerRadius = 14; effect.layer?.masksToBounds = true
+            effect.wantsLayer = true; effect.layer?.cornerRadius = DiceStyle.cornerRadius; effect.layer?.masksToBounds = true
             let hosting = NSHostingView(rootView: DiceView(model: model)); hosting.translatesAutoresizingMaskIntoConstraints = false
             effect.addSubview(hosting)
             NSLayoutConstraint.activate([hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor), hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor), hosting.topAnchor.constraint(equalTo: effect.topAnchor), hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor)])
             w.contentView = effect; w.center(); window = w
         }
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil)
     }
     func application(_ sender: NSApplication, open urls: [URL]) { openImages(urls) }
@@ -40,7 +54,7 @@ import AppKit
         guard !model.busy && !model.importing else { showWindow(); model.alert = "Finish the current images before opening another selection."; return }
         model.clear(); showWindow(); model.add(urls)
     }
-    func windowWillClose(_ notification: Notification) { window = nil; if !model.busy && !model.importing { model.clear() } }
+    func windowWillClose(_ notification: Notification) { window = nil; model.closeSession(); NSApp.setActivationPolicy(.accessory) }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) { model.cleanup() }
 }

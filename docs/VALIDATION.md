@@ -1,3 +1,17 @@
+# v0.1.1 validation — 2026-10-08
+
+The release build compiles and the installed `/Applications/Dice.app` passes deep, strict code-signature verification. It is ad-hoc signed, not notarized.
+
+All 11 standalone checks pass, including a new search check covering filenames, diacritics, metadata names/values, dimensions, recognized-text input and multi-term matching across fields.
+
+Native interface checks verified Applications launch/reopen, shared image/metadata/batch navigation, searchable batch selection and removal without deleting originals. Generated fixtures demonstrated actual OCR search for “Lantern” and metadata search for “Artist Atlas”. Native close was exercised; the installed process switched from regular (Dock visible) to accessory (Dock hidden), and reopening restored the editor. Minimize and fullscreen are disabled at the window level.
+
+The default window is 620 × 460 points, with a 520 × 420 minimum. Typography, accent and control sizing are centralized in `Sources/Dice/Style.swift`, with the interface guide documenting their use. The title bar is transparent and the content fills it; native traffic lights occupy the left and Start applies the current settings from the right toolbar.
+
+The package is approximately 21.3 MB installed and 6.7 MB zipped. The Finder Quick Action targets the installed Applications copy. No systematic memory benchmark or clean-system compatibility check was performed for this update.
+
+---
+
 # v0.1 validation — 2026-10-08
 
 The release build compiles and its application bundle passes `codesign --verify --deep --strict` with an ad-hoc signature. This is not a notarized distribution build.

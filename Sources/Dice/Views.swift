@@ -2,12 +2,16 @@ import SwiftUI
 import AppKit
 import ImageIO
 import DiceCore
+import UniformTypeIdentifiers
 
-private let accent = Color(red: 0.96, green: 0.35, blue: 0.10)
+private let accent = DiceStyle.accent
 struct DiceView: View {
     @ObservedObject var model: DiceModel
     @State private var metadata = false
     @State private var settings = false
+    @State private var batch = false
+    @State private var batchSearch = ""
+    @State private var targeted = false
     @State private var preview: NSImage?
     @State private var inspected: ImageInfo?
     @State private var previewError: String?
@@ -15,22 +19,49 @@ struct DiceView: View {
     var displayedURL: URL? { model.selection?.result?.url ?? model.selection?.url }
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            if metadata {
-                MetadataPane(info: inspected, model: model).padding(.top, 51)
+            if batch {
+                BatchPane(model: model, query: $batchSearch) { id in model.selected = id; batch = false }
+                    .padding(.top, 52).padding(.bottom, model.items.isEmpty ? 16 : 52)
+            } else if model.items.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "die.face.5").font(DiceStyle.emptySymbol).foregroundStyle(.secondary)
+                    Button("Choose images…") { model.chooseFiles() }.buttonStyle(.plain).font(DiceStyle.body).foregroundStyle(.secondary)
+                    Text("or drop them here").font(DiceStyle.caption).foregroundStyle(.tertiary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if metadata {
+                MetadataPane(info: inspected, model: model).id(model.selected).padding(.top, 60).padding(.bottom, 52)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
                     if let preview {
-                        Image(nsImage: preview).resizable().scaledToFit().padding(.horizontal, 20).padding(.top, 54).padding(.bottom, 20)
+                        Image(nsImage: preview).resizable().scaledToFit().padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
                     } else if let error = previewError {
-                        Text(error).font(.caption).foregroundStyle(.secondary).padding(30)
+                        Text(error).font(DiceStyle.caption).foregroundStyle(.secondary).padding(30)
                     } else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
             }
-            toolbar.padding(12)
-
+            toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch ? 80 : 0)
+            if !model.items.isEmpty {
+                VStack { Spacer(); HStack { Spacer(); pager }.padding(DiceStyle.inset) }
+            }
         }
-        .frame(minWidth: 430, minHeight: 340)
+        .font(DiceStyle.body)
+        .ignoresSafeArea()
+        .frame(minWidth: 520, minHeight: 420)
+        .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
+            guard !model.busy && !model.importing else { return false }
+            let group = DispatchGroup(); let urls = DropURLs()
+            for provider in providers {
+                group.enter()
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    defer { group.leave() }
+                    if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) { urls.append(url) }
+                    else if let url = item as? URL { urls.append(url) }
+                }
+            }
+            group.notify(queue: .main) { model.add(urls.values) }; return true
+        }
+        .overlay { if targeted { RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.6), lineWidth: 1).allowsHitTesting(false) } }
         .tint(accent)
         .task(id: displayedURL) { await loadPreview() }
         .alert("Dice couldn’t finish", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("OK") { model.alert = nil } } message: { Text(model.alert ?? "") }
@@ -39,40 +70,49 @@ struct DiceView: View {
     func step(_ direction: Int) { guard !model.items.isEmpty else { return }; model.selected = model.items[(index + direction + model.items.count) % model.items.count].id }
     var toolbar: some View {
         HStack(spacing: 2) {
-            if metadata {
+            if batch {
+                icon("arrow.left", "Back to image") { batch = false }
+                Spacer()
+                Text("Images").font(DiceStyle.label).foregroundStyle(.secondary)
+                Spacer()
+                icon("plus", "Add images") { model.chooseFiles() }.disabled(model.busy || model.importing)
+            } else if metadata {
                 icon("arrow.left", "Back to image") { flip() }
                 Spacer(minLength: 10)
-                Text("Metadata").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Text("Metadata").font(DiceStyle.label).foregroundStyle(.secondary)
                 Spacer()
                 if let info = inspected { Menu { Button("Copy all tags") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(info.rows.map { "[\($0.group)] \($0.name): \($0.value)" }.joined(separator: "\n"), forType: .string) }; Button("Export JSON…") { model.exportMetadata(info) } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().padding(7) }
             } else {
-                if model.items.count > 1 {
-                    Menu {
-                        ForEach(model.items) { item in Button(item.url.lastPathComponent) { model.selected = item.id } }
-                    } label: { Text("\(index + 1)/\(model.items.count)").font(.system(size: 10, design: .monospaced)) }.menuStyle(.borderlessButton).fixedSize().padding(7)
-                }
+                icon("plus", "Add images") { model.chooseFiles() }.disabled(model.busy || model.importing)
                 if model.busy || model.importing { ProgressView().controlSize(.mini).padding(.horizontal, 8) }
-                icon("info", "View metadata") { flip() }.disabled(inspected == nil)
+                icon("info", "View metadata") { flip() }.disabled(inspected == nil || model.items.isEmpty)
                 icon("slider.horizontal.3", "Conversion settings") { settings.toggle() }
                     .popover(isPresented: $settings, arrowEdge: .bottom) { optionsPanel }
-                icon("arrow.down", "Process and save a copy") { model.process(andSave: true) }.disabled(model.busy || model.importing || model.items.isEmpty)
+                icon("arrow.down", "Save processed copies") { model.save() }.disabled(model.busy || model.importing || model.results.isEmpty)
             }
-            icon("xmark", "Close") { NSApp.keyWindow?.close() }
+            icon("play.fill", "Start with current settings") { settings = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 4).padding(.vertical, 3)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
-        .frame(maxWidth: metadata ? .infinity : nil)
+        .frame(maxWidth: metadata || batch ? .infinity : nil)
+    }
+    var pager: some View {
+        HStack(spacing: 0) {
+            icon("chevron.left", "Previous image") { step(-1) }.disabled(model.items.count < 2)
+            Button { batch.toggle() } label: { Text("\(index + 1) / \(model.items.count)").font(DiceStyle.page).padding(.horizontal, 7).frame(height: DiceStyle.controlSize) }.help("Browse and search all images").accessibilityLabel("Browse images, page \(index + 1) of \(model.items.count)")
+            icon("chevron.right", "Next image") { step(1) }.disabled(model.items.count < 2)
+        }.buttonStyle(.plain).padding(3).background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
     }
     func icon(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).font(.system(size: 12, weight: .medium)).frame(width: 27,height: 27).contentShape(Rectangle()) }.help(label).accessibilityLabel(label)
+        Button(action: action) { Image(systemName: symbol).font(DiceStyle.control).frame(width: DiceStyle.controlSize,height: DiceStyle.controlSize).contentShape(Rectangle()) }.help(label).accessibilityLabel(label)
     }
     func flip() { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { metadata.toggle() } }
     var optionsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Image settings").font(.system(size: 12, weight: .semibold))
-            Toggle("Metadata only", isOn: $model.options.metadataOnly).font(.caption)
+            Text("Image settings").font(DiceStyle.heading)
+            Toggle("Metadata only", isOn: $model.options.metadataOnly).font(DiceStyle.caption)
             if !model.options.metadataOnly {
                 Picker("Format", selection: $model.options.format) { ForEach(OutputFormat.allCases) { Text($0.rawValue).tag($0) } }
                 Picker("Resize", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }
@@ -83,9 +123,9 @@ struct DiceView: View {
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
             }
             Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly)
-            Text(model.options.metadataOnly ? "Pixels stay unchanged. Colour and orientation are retained." : "Copies only. No upscaling. PNG is lossless; JPEG transparency becomes white.").font(.system(size: 9)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(model.options.metadataOnly ? "Pixels stay unchanged. Colour and orientation are retained." : "Copies only. No upscaling. PNG is lossless; JPEG transparency becomes white.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack { Spacer(); Button("Apply") { settings = false; model.process() }.buttonStyle(.borderedProminent).disabled(model.busy || model.importing) }
-        }.font(.system(size: 11)).padding(16).frame(width: 275).tint(accent).disabled(model.busy || model.importing)
+        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 310).tint(accent).disabled(model.busy || model.importing)
     }
     func number(_ binding: Binding<Int>) -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel("Resize value") }
     func loadPreview() async {
@@ -122,20 +162,66 @@ struct MetadataPane: View {
                     Spacer()
                     if info.hasGPS { Image(systemName: "location.fill").foregroundStyle(accent).help("GPS metadata found") }
                     Text("\(info.rows.count) tags")
-                }.font(.system(size: 10)).foregroundStyle(.secondary)
-                if let camera = info.camera { Text(camera).font(.system(size: 10)).foregroundStyle(.secondary) }
+                }.font(DiceStyle.caption).foregroundStyle(.secondary)
+                if let camera = info.camera { Text(camera).font(DiceStyle.caption).foregroundStyle(.secondary) }
             }
             HStack(spacing: 8) {
                 TextField("Search metadata", text: $search).textFieldStyle(.roundedBorder)
                 Picker("Group", selection: $group) { ForEach(groups,id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 110)
             }.controlSize(.small)
             Table(rows, selection: $selected) {
-                TableColumn("Tag") { row in VStack(alignment: .leading, spacing: 2) { Text(row.name).font(.system(size: 10, weight: .medium)); Text(row.group).font(.system(size: 8)).foregroundStyle(.secondary) } }.width(min: 120, ideal: 155, max: 210)
-                TableColumn("Value") { row in Text(row.value).font(.system(size: 10, design: .monospaced)).textSelection(.enabled).help(row.value).contextMenu { Button("Copy value") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(row.value, forType: .string) } } }
+                TableColumn("Tag") { row in VStack(alignment: .leading, spacing: 2) { Text(row.name).font(DiceStyle.label); Text(row.group).font(DiceStyle.caption).foregroundStyle(.secondary) } }.width(min: 120, ideal: 155, max: 210)
+                TableColumn("Value") { row in Text(row.value).font(DiceStyle.data).textSelection(.enabled).help(row.value).contextMenu { Button("Copy value") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(row.value, forType: .string) } } }
             }.scrollContentBackground(.hidden)
             if let row = rows.first(where: { $0.id == selected }) {
-                ScrollView { Text(row.value).font(.system(size: 10, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 46)
+                ScrollView { Text(row.value).font(DiceStyle.data).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 46)
             }
         }.padding(.horizontal, 16).padding(.bottom, 14)
     }
+}
+
+struct BatchPane: View {
+    @ObservedObject var model: DiceModel
+    @Binding var query: String
+    let select: (UUID) -> Void
+    var filtered: [ImageItem] { model.items.filter { ImageSearch.matches(query, text: $0.searchText) } }
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                TextField("Search names, metadata or image text", text: $query).textFieldStyle(.roundedBorder).controlSize(.small)
+                if model.importing { ProgressView().controlSize(.mini).help("Reading metadata and text") }
+            }
+            if filtered.isEmpty {
+                Text(model.items.isEmpty ? "Add images to start a batch." : "No images match this search.").font(DiceStyle.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(filtered) { item in
+                            HStack(spacing: 10) {
+                                Button { select(item.id) } label: {
+                                    HStack(spacing: 10) {
+                                        if let thumbnail = item.thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit().frame(width: 36,height: 36) }
+                                        else { Image(systemName: "photo").frame(width: 36,height: 36) }
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.url.lastPathComponent).font(DiceStyle.label).lineLimit(1)
+                                            if let info = item.info { Text("\(info.width) × \(info.height) · \(bytes(info.bytes))").font(DiceStyle.data).foregroundStyle(.secondary) }
+                                            if let error = item.error { Text(error).font(DiceStyle.caption).foregroundStyle(.red).lineLimit(1) }
+                                        }
+                                        Spacer(minLength: 0)
+                                    }.contentShape(Rectangle())
+                                }.buttonStyle(.plain).help("Open \(item.url.lastPathComponent)")
+                                Button { model.remove(item.id) } label: { Image(systemName: "xmark").font(DiceStyle.caption).frame(width: 22,height: 26) }.buttonStyle(.plain).help("Remove from Dice; original stays in place").accessibilityLabel("Remove \(item.url.lastPathComponent)").disabled(model.busy || model.importing)
+                            }.padding(8).background(item.id == model.selected ? accent.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                        }
+                    }
+                }
+            }
+            HStack { Text("\(filtered.count) of \(model.items.count) images").font(DiceStyle.caption).foregroundStyle(.secondary); Spacer() }
+        }.padding(.horizontal, 16)
+    }
+}
+final class DropURLs: @unchecked Sendable {
+    private let lock = NSLock(); private var storage: [URL] = []
+    func append(_ url: URL) { lock.lock(); defer { lock.unlock() }; storage.append(url) }
+    var values: [URL] { lock.lock(); defer { lock.unlock() }; return storage }
 }

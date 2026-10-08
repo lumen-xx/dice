@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ImageIO
 import DiceCore
+import Vision
 
 struct ImageItem: Identifiable {
     let id = UUID()
@@ -10,6 +11,10 @@ struct ImageItem: Identifiable {
     var error: String?
     var result: ConversionResult?
     var thumbnail: NSImage?
+    var recognizedText = ""
+    var resultInfo: ImageInfo?
+    var searchText = ""
+    mutating func rebuildSearch() { searchText = ImageSearch.text(filename: url.lastPathComponent, path: url.path, info: info, recognizedText: recognizedText, extraInfo: resultInfo, error: error) }
 }
 @MainActor final class DiceModel: ObservableObject {
     @Published var items: [ImageItem] = []
@@ -20,8 +25,8 @@ struct ImageItem: Identifiable {
     @Published var status = "All processing stays on this Mac"
     @Published var alert: String?
     @Published var completed = 0
-    @Published var showInspector = false
     private var cancelRequested = false
+    private var closeRequested = false
     let session: URL
     init() {
         if let data = UserDefaults.standard.data(forKey: "dice.options"), let saved = try? JSONDecoder().decode(Options.self, from: data) { options = saved }
@@ -50,6 +55,7 @@ struct ImageItem: Identifiable {
         let accepted = Array(Set(urls.filter { $0.isFileURL })).sorted { $0.path < $1.path }
         let fresh = accepted.filter { url in !items.contains(where: { $0.url == url }) }
         guard !fresh.isEmpty else { return }
+        closeRequested = false
         importing = true
         Task {
             for url in fresh {
@@ -59,20 +65,31 @@ struct ImageItem: Identifiable {
                     if let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 96] as CFDictionary) {
                         item.thumbnail = NSImage(cgImage: image, size: .zero)
                     }
+                    if let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1600] as CFDictionary) {
+                        let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate
+                        request.usesLanguageCorrection = true; request.automaticallyDetectsLanguage = true
+                        if (try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])) != nil {
+                            item.recognizedText = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+                        }
+                    }
+                    item.rebuildSearch()
                     return item
                 }.value
+                if closeRequested { break }
                 items.append(loaded)
                 if selected == nil { selected = loaded.id }
             }
             importing = false
+            if closeRequested { clear(); return }
             status = "\(items.count) image\(items.count == 1 ? "" : "s") ready"
         }
     }
     func remove(_ id: UUID) {
         guard !busy, !importing else { return }
         if let result = items.first(where: { $0.id == id })?.result { try? FileManager.default.removeItem(at: result.url) }
+        let removedIndex = items.firstIndex { $0.id == id } ?? 0
         items.removeAll { $0.id == id }
-        if selected == id { selected = items.first?.id }
+        if selected == id { selected = items.isEmpty ? nil : items[min(removedIndex, items.count - 1)].id }
     }
     func clear() {
         guard !busy, !importing else { return }
@@ -85,7 +102,7 @@ struct ImageItem: Identifiable {
         busy = true; cancelRequested = false; completed = 0
         for i in items.indices {
             if let result = items[i].result { try? FileManager.default.removeItem(at: result.url) }
-            items[i].result = nil
+            items[i].result = nil; items[i].resultInfo = nil; items[i].rebuildSearch()
         }
         Task {
             for index in items.indices {
@@ -97,12 +114,17 @@ struct ImageItem: Identifiable {
                     autoreleasepool { Result { try Engine.convert(input, options: snapshot, directory: directory) } }
                 }.value
                 switch result {
-                case .success(let output): items[index].result = output; items[index].error = nil
+                case .success(let output):
+                    items[index].result = output; items[index].error = nil
+                    let info = await Task.detached { try? Engine.inspect(output.url) }.value
+                    items[index].resultInfo = info
                 case .failure(let error): items[index].error = error.localizedDescription
                 }
+                items[index].rebuildSearch()
                 completed += 1
             }
             busy = false
+            if closeRequested { clear(); return }
             status = cancelRequested ? "Stopped after the current image" : "\(results.count) of \(items.count) images processed"
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
             if andSave && !cancelRequested && !results.isEmpty { save() }
@@ -137,6 +159,11 @@ struct ImageItem: Identifiable {
             let records = info.rows.map { ["group": $0.group, "tag": $0.name, "value": $0.value] }
             try JSONSerialization.data(withJSONObject: records, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
         } catch { alert = error.localizedDescription }
+    }
+    func closeSession() {
+        closeRequested = true
+        if busy { cancel() }
+        if !busy && !importing { clear() }
     }
     func cleanup() { try? FileManager.default.removeItem(at: session) }
 }
