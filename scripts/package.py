@@ -93,7 +93,12 @@ if __name__ == '__main__':
     run('iconutil', '-c', 'icns', str(BUILD / 'Dice.iconset'), '-o', str(resources / 'Dice.icns'))
     for key in ('com.apple.FinderInfo', 'com.apple.ResourceFork'):
         subprocess.run(['xattr', '-dr', key, str(APP)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    run('codesign', '--force', '--sign', '-', str(APP))
+    # A stable identity keeps macOS privacy permissions across updates; an ad-hoc signature changes with every build.
+    keychain = call('bash', str(ROOT / 'scripts/signing-identity.sh'))
+    run('codesign', '--force', '--keychain', keychain, '--sign', 'Dice Local Signing', str(APP))
+    requirement = subprocess.run(['codesign', '-d', '--requirements', '-', str(APP)], capture_output=True, text=True)
+    if 'certificate leaf' not in requirement.stdout + requirement.stderr:
+        raise SystemExit('Dice was not signed with the stable identity.')
     run('codesign', '--verify', '--deep', '--strict', str(APP))
     size = sum(f.stat().st_size for f in APP.rglob('*') if f.is_file())
     print(f'Installed app: {size / 1_000_000:.2f} MB')

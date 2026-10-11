@@ -6,7 +6,7 @@ Source remains in the private `lumen-xx/dice` repository. Downloads, release not
 
 Sparkle 2.10.0 verifies Ed25519 update archives before extraction and verifies the signed feed. The feed-signature failure timeout is disabled. Unsigned/tampered archives are rejected. These signatures authenticate Dice updates; they do not replace Developer ID notarization for the initial browser-downloaded installation.
 
-The release key is stored in the login Keychain under Sparkle account `dice`. Only its public key is committed in `updates/config.json`. Keep the Keychain backed up: loss of this private key would prevent issuing trusted updates to existing ad-hoc builds. No key is exported by the normal build or publisher.
+The release key is stored in the login Keychain under Sparkle account `dice`. Only its public key is committed in `updates/config.json`. Keep the Keychain backed up: loss of this private key would prevent issuing trusted updates to existing builds. No key is exported by the normal build or publisher.
 
 ## Release steps
 
@@ -27,3 +27,5 @@ Existing v0.1.4 and older builds have no updater. Install one updater-enabled re
 The separate Dice Dev copy uses another bundle identifier and is marked as a development build; it does not install production updates over that identity. Use Dice in Applications to update releases. Rebuild the dev copy from source instead.
 
 If images are being imported or processed, a new manual check is blocked until they finish. If an installation is already ready while images are active or processed copies remain unsaved, relaunch waits: save the copies and close the Dice editor to proceed.
+
+From 0.1.26, Dice is signed with a stable local identity, **Dice Local Signing**, instead of an ad-hoc signature that changes with every build. `scripts/signing-identity.sh` creates it once in `~/Library/Keychains/dice-signing.keychain-db`, with its password in `~/.config/dice/signing-password`. macOS keys privacy permissions to this identity, so they survive updates. Back up both files; a new identity means granting permissions once more. Sparkle accepts the change of code signature because updates keep the same EdDSA key.
