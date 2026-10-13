@@ -6,7 +6,7 @@ macOS 14+ · Apple silicon
 
 ## Install
 
-1. [Download Dice](https://github.com/lumen-xx/dice-releases/releases), unzip and move **Dice.app** to **Applications**.
+1. [Download Dice](https://github.com/lumen-xx/dice/releases/latest), unzip and move **Dice.app** to **Applications**.
 2. Open it. If macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
 
 Dice is not notarized yet.
@@ -31,3 +31,7 @@ python3 scripts/package.py         # release app + ZIP in build/
 Checks: `DICE_TOOLS="$(cat build/app-path.txt)/Contents/Resources/Tools" swift run DiceChecks`
 
 More: [style guide](docs/STYLE_GUIDE.md) · [validation](docs/VALIDATION.md) · [updates](docs/UPDATES.md) · [third-party notices](THIRD_PARTY_NOTICES.md)
+
+## License
+
+[MIT](LICENSE). Dice bundles ExifTool, cwebp, resvg and Sparkle under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -276,8 +276,11 @@ struct DiceView: View {
                 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
                 let year = Calendar.current.component(.year, from: Date())
                 Text("Dice \(version)")
-                Text("© \(String(year)) opyuii. All rights reserved.")
-                Link("opyuii.com", destination: URL(string: "https://opyuii.com")!)
+                Text("© \(String(year)) opyuii · open source under the MIT License")
+                HStack(spacing: 10) {
+                    Link("GitHub", destination: URL(string: "https://github.com/lumen-xx/dice")!)
+                    Link("opyuii.com", destination: URL(string: "https://opyuii.com")!)
+                }
             }.font(DiceStyle.caption).foregroundStyle(.secondary)
         }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 380).tint(accent)
     }

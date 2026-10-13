@@ -24,6 +24,9 @@ def prepare_tools(destination):
     exif = destination / 'exiftool'; exif.mkdir(exist_ok=True)
     script = (exifprefix / 'bin/exiftool').read_text()
     script = '\n'.join(line for line in script.split('\n') if not (line.startswith('unshift @INC,') and '/opt/homebrew/' in line))
+    # The Artistic License asks for a notice in each changed file saying how it was changed.
+    first, rest = script.split('\n', 1)
+    script = first + '\n# Modified for Dice: the Homebrew-specific "unshift @INC" lines were removed so the bundled modules are used.\n' + rest
     (exif / 'exiftool').write_text(script)
     lib = exif / 'lib'; lib.mkdir(exist_ok=True)
     source = exifprefix / 'libexec/lib/perl5'

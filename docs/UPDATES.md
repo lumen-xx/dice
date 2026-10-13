@@ -2,7 +2,7 @@
 
 The application menu contains Check for Updates… and Include Preview Releases. Checks are manual by default, with no background checking or automatic installation. Preview releases are enabled by default during v0.1 development; disabling them accepts only stable entries.
 
-Source remains in the private `lumen-xx/dice` repository. Downloads, release notes and the signed appcast live in public `lumen-xx/dice-releases`. The app does not call the authenticated GitHub API or contain a token. Its HTTPS feed points to tagged GitHub release assets, so prereleases work without relying on GitHub’s stable-only latest-download redirect.
+Source, downloads, release notes and the signed appcast live in the public `lumen-xx/dice` repository. The feed is the appcast asset of the latest GitHub release (`releases/latest/download/appcast.xml`), so every release is published as GitHub's latest; preview builds are marked by their Sparkle channel inside the feed. The app does not call the authenticated GitHub API or contain a token. Builds up to 0.1.26 read `appcast.xml` in the old `lumen-xx/dice-releases` repository; publishing copies each new signed feed there (with `docs/LEGACY_README.md` as its README), so those copies update to a build that reads the new feed.
 
 Sparkle 2.10.0 verifies Ed25519 update archives before extraction and verifies the signed feed. The feed-signature failure timeout is disabled. Unsigned/tampered archives are rejected. These signatures authenticate Dice updates; they do not replace Developer ID notarization for the initial browser-downloaded installation.
 
@@ -14,9 +14,9 @@ The release key is stored in the login Keychain under Sparkle account `dice`. On
 2. Build with `python3 scripts/package.py`.
 3. Write release notes to a plain text or Markdown file.
 4. Prepare and verify the signed assets with `python3 scripts/publish-update.py --notes /absolute/path/notes.md`.
-5. Add `--publish` to that command to create a GitHub release and update the feed.
+5. Add `--publish` to that command to create the GitHub release and pass the feed on to the old repository.
 
-The publisher verifies the configured Keychain key, the packaged version, the existing signed feed, the archive signature and the new feed signature. It preserves prior feed entries, including stable entries while publishing previews. The archive is published before updating the feed; GitHub’s file revision prevents silently overwriting a concurrent feed edit. Reusing a build number is rejected. Published releases are immutable by convention: fix any error with a newer build.
+The publisher verifies the configured Keychain key, the packaged version, the existing signed feed, the archive signature and the new feed signature. It preserves prior feed entries, including stable entries while publishing previews. The archive and feed are published together as one release; a release published while preparing is detected, so the feed never drops it. Reusing a build number is rejected. Published releases are immutable by convention: fix any error with a newer build.
 
 Automatic publishing here means one release command handles signing, upload and feed publication. It is not a hosted GitHub Actions build: building depends on the development Mac’s pinned tools and signing key.
 
