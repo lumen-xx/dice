@@ -117,9 +117,16 @@ final class DiceWindow: NSWindow {
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
     func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool { showWindow(); return true }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
+    /// 620 × 460, or `--size <width>x<height>` for screenshots.
+    private static var launchSize: NSSize {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--size"), index + 1 < arguments.count else { return NSSize(width: 620, height: 460) }
+        let parts = arguments[index + 1].split(separator: "x").compactMap { Double($0) }
+        return parts.count == 2 ? NSSize(width: parts[0], height: parts[1]) : NSSize(width: 620, height: 460)
+    }
     func showWindow() {
         if window == nil {
-            let w = DiceWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 460), styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
+            let w = DiceWindow(contentRect: NSRect(origin: .zero, size: Self.launchSize), styleMask: [.borderless, .resizable], backing: .buffered, defer: false)
             w.title = "Dice"; w.hasShadow = true
             w.isReleasedWhenClosed = false; w.isOpaque = false; w.backgroundColor = .clear
             w.isMovableByWindowBackground = true; w.delegate = self

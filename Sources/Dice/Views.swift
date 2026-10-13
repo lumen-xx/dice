@@ -12,8 +12,10 @@ struct DiceView: View {
     @State private var imageSettingsPresented = false
     @State private var exportPopoverPresented = false
     @State private var finderMenu = FinderMenu.isEnabled
-    @State private var metadata = false
-    @State private var batch = false
+    // `--show metadata` or `--show batch` opens that pane, for screenshots; normal launches start on the image.
+    @State private var metadata = DiceView.launchPane == "metadata"
+    @State private var batch = DiceView.launchPane == "batch"
+    private static let launchPane = CommandLine.arguments.firstIndex(of: "--show").flatMap { CommandLine.arguments.dropFirst($0 + 1).first }
     @State private var batchSearch = ""
     @State private var targeted = false
     @State private var loadedPreviewKey: String?
