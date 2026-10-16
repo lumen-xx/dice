@@ -15,6 +15,9 @@ def prepare_tools(destination):
     optimizer = BUILD / 'vendor/oxipng/bin/oxipng'
     if not optimizer.exists() or call(str(optimizer), '--version') != 'oxipng 10.2.1':
         raise SystemExit('Build the pinned PNG optimizer: cargo install oxipng --version 10.2.1 --locked --root build/vendor/oxipng')
+    encoder = BUILD / 'vendor/jxl/bin/cjxl'
+    if not encoder.exists() or not call(str(encoder), '--version').startswith('cjxl v0.12.0 '):
+        raise SystemExit('Vendor the pinned JPEG XL encoder: python3 scripts/vendor-jxl.py')
     exifprefix = pathlib.Path(call('brew', '--prefix', 'exiftool'))
     webpprefix = pathlib.Path(call('brew', '--prefix', 'webp'))
     webpversion = call(str(webpprefix / 'bin/cwebp'), '-version')
@@ -66,8 +69,11 @@ def prepare_tools(destination):
     binary.chmod(0o755); bundle(binary)
     animator.chmod(0o755); bundle(animator)
     for file in list(dylibs.glob('*.dylib')) + [binary, animator]: run('codesign', '--force', '--sign', '-', str(file))
+    # cjxl keeps its own libraries (it needs a newer libpng than cwebp); scripts/vendor-jxl.py relocated and signed them.
+    shutil.copytree(BUILD / 'vendor/jxl', destination / 'jxl', dirs_exist_ok=True)
+    for file in list((destination / 'jxl/lib').glob('*.dylib')) + [destination / 'jxl/bin/cjxl']: run('codesign', '--force', '--sign', '-', str(file))
     shutil.copytree(ROOT / 'vendor/licenses', destination / 'Licenses', dirs_exist_ok=True)
-    (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\noxipng 10.2.1\n' + call(str(binary), '-version') + '\n')
+    (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\noxipng 10.2.1\ncjxl 0.12.0\n' + call(str(binary), '-version') + '\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
@@ -114,7 +120,7 @@ if __name__ == '__main__':
     run('codesign', '--verify', '--deep', '--strict', str(APP))
     size = sum(f.stat().st_size for f in APP.rglob('*') if f.is_file())
     print(f'Installed app: {size / 1_000_000:.2f} MB')
-    if size >= 40_000_000: raise SystemExit('App exceeds the 40 MB budget')
+    if size >= 45_000_000: raise SystemExit('App exceeds the 45 MB budget')
     archive = BUILD / (('Dice-Dev-v' if args.dev else 'Dice-v') + VERSION['version'] + '-apple-silicon.zip')
     if archive.exists(): archive.unlink()
     run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(APP), str(archive))

@@ -301,7 +301,7 @@ struct DiceView: View {
                 if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
                 if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { compressionRow }
                 if writesPNG { HStack(spacing: 6) { Toggle("Optimise PNG", isOn: $model.options.optimizePNG); InfoTip("Recompresses PNG files losslessly with oxipng: smaller files, identical pixels."); Spacer(minLength: 0) } }
-                if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
+                if model.options.format.hasLosslessMode { Toggle("Lossless", isOn: $model.options.webpLossless) }
                 if model.options.format == .pdf && model.items.count > 1 { HStack(spacing: 6) { Toggle("Combine into one PDF", isOn: $model.options.combinePDF); InfoTip("Every image becomes a page, in batch order, in a single PDF saved beside the first image."); Spacer(minLength: 0) } }
             }
             if !model.preferences.alwaysStripMetadata {

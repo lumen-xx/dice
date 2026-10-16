@@ -1,3 +1,13 @@
+# v0.2.6 JPEG XL — 2026-10-16
+
+All 52 standalone checks pass, one of them new. JPEG XL output through the bundled cjxl 0.12.0: a 200 × 150 PNG becomes a 200 × 150 file that ImageIO reads as `public.jpeg-xl`, with kept XMP Creator; quality 30% is smaller than 90%; Lossless (`-d 0`) decodes to identical pixels for an opaque photo and a half-transparent image; "Same as original" keeps a JPEG XL as JPEG XL with no note (before, it became JPEG); metadata-only removal works on it; a 20 KB target size is met. The lossless and metadata-only checks were confirmed to fail with their change reverted. The same-as-original fallback check now expects JPEG XL.
+
+The size budget is raised from 40 to 45 MB at your request. cjxl needs a newer libpng (compatibility 75) than the one bundled for cwebp (67), so it lives in `Tools/jxl` with its own 20 libraries, about 8 MB, taken from Homebrew's bottles by `scripts/vendor-jxl.py` without installing or upgrading anything; the pinned webp and exiftool are unchanged. With `DYLD_PRINT_LIBRARIES`, the bundled cjxl loads only its own libraries and the system's. The installed app is 43.5 MB.
+
+Native review of Dice Dev with JPEG XL as the default format: Image settings shows JPEG XL, Quality and Lossless; Start saved `first-dice.jxl`, which macOS reads at 400 px.
+
+---
+
 # v0.2.5 background removal — 2026-10-16
 
 All 51 standalone checks pass, one of them new. On a synthetic red ball with a shadow on a pale table, Remove background (Vision's foreground instance mask, on device) leaves the corners fully transparent and the ball's centre opaque red; a JPEG with "Same as original" is saved as PNG to keep the transparency, while an explicit JPEG is flattened onto the fill colour; a 1:1 crop resized to 100 px as WebP stays transparent around the ball; Resize only still processes an image already within the size; a plain grey image fails with "couldn't find a subject" and writes nothing. Each part was confirmed to fail with its code reverted (mask not applied, JPEG kept as JPEG, resize-only skipping).

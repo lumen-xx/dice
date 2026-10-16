@@ -422,7 +422,7 @@ final class EngineTests {
         XCTAssertEqual(match(UTType.jpeg.identifier), "JPEG"); XCTAssertEqual(match("public.heif"), "HEIC*")
         XCTAssertEqual(match("public.heics"), "HEIC*"); XCTAssertEqual(match("public.avis"), "AVIF*")
         XCTAssertEqual(match("com.adobe.raw-image"), "JPEG*"); XCTAssertEqual(match("com.sony.arw-raw-image"), "JPEG*")
-        XCTAssertEqual(match("public.jpeg-xl"), "JPEG*"); XCTAssertEqual(match("com.adobe.photoshop-image"), "PNG*")
+        XCTAssertEqual(match("public.jpeg-xl"), "JPEG XL"); XCTAssertEqual(match("com.adobe.photoshop-image"), "PNG*")
         XCTAssertEqual(match(UTType.pdf.identifier), "PNG*")
         XCTAssertFalse(OutputFormat.original.usesQuality(forInputType: UTType.png.identifier))
         XCTAssertFalse(OutputFormat.original.usesQuality(forInputType: UTType.svg.identifier))
@@ -891,6 +891,38 @@ final class EngineTests {
         catch { XCTAssertTrue(error.localizedDescription.contains("couldn't find a subject")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("grey-dice.png").path))
     }
+    func testJPEGXL() throws {
+        XCTAssertTrue(Engine.canEncode(.jxl))
+        let photo = try fixture(name: "photo", width: 200, height: 150, format: UTType.png.identifier)
+        _ = try runExif(["-overwrite_original", "-XMP-dc:Creator=Keep me", photo.path])
+        var o = Options(); o.format = .jxl; o.quality = 0.9; o.stripMetadata = false
+        let lossy = try Engine.convert(photo, options: o, directory: directory)
+        XCTAssertEqual(lossy.url.pathExtension, "jxl"); XCTAssertTrue(dimensions(lossy.url) == (200, 150))
+        XCTAssertEqual(CGImageSourceGetType(CGImageSourceCreateWithURL(lossy.url as CFURL, nil)!) as String?, "public.jpeg-xl")
+        XCTAssertTrue(try Engine.inspect(lossy.url).value("Creator")?.contains("Keep me") == true)
+        o.quality = 0.3; o.stripMetadata = true
+        let smaller = try Engine.convert(photo, options: o, directory: directory)
+        XCTAssertTrue(smaller.bytes < lossy.bytes); XCTAssertNil(try Engine.inspect(smaller.url).value("Creator"))
+        // Lossless: identical pixels, transparency included.
+        let clear = directory.appendingPathComponent("clear.png")
+        write([image(32, alpha: 0.5)], to: clear, type: .png)
+        o = Options(); o.format = .jxl; o.webpLossless = true
+        for input in [photo, clear] {
+            let output = try Engine.convert(input, options: o, directory: directory)
+            let a = try Engine.previewImage(input, maxPixelSize: 300), b = try Engine.previewImage(output.url, maxPixelSize: 300)
+            for (x, y) in [(0, 0), (7, 3), (19, 30), (31, 31)] { XCTAssertEqual(rgba(a, x: x, y: y), rgba(b, x: x, y: y)) }
+        }
+        // Same as original keeps JPEG XL; metadata-only works on it; a target size is met.
+        let jxl = try Engine.convert(photo, options: { var x = Options(); x.format = .jxl; x.stripMetadata = false; return x }(), directory: directory)
+        let same = try Engine.convert(jxl.url, options: Options(), directory: directory)
+        XCTAssertEqual(same.url.pathExtension, "jxl"); XCTAssertNil(same.note)
+        var only = Options(); only.metadataOnly = true
+        let cleaned = try Engine.convert(jxl.url, options: only, directory: directory)
+        XCTAssertNil(try Engine.inspect(cleaned.url).value("Creator")); XCTAssertTrue(dimensions(cleaned.url) == (200, 150))
+        var sized = Options(); sized.format = .jxl; sized.useTargetSize = true; sized.targetKB = 20
+        let fitted = try Engine.convert(photo, options: sized, directory: directory)
+        XCTAssertTrue(fitted.bytes <= 20_000); XCTAssertTrue(fitted.note?.contains("Fits 20 KB") == true)
+    }
 }
 
 @main struct Checks {
@@ -947,7 +979,8 @@ final class EngineTests {
             ("HDR kept with gain maps, or tone-mapped", suite.testHDRKeptOrToneMapped),
             ("metadata-only removal keeps HDR", suite.testMetadataOnlyKeepsHDR),
             ("location-only metadata removal", suite.testLocationOnlyRemoval),
-            ("background removal", suite.testBackgroundRemoval)
+            ("background removal", suite.testBackgroundRemoval),
+            ("JPEG XL output, lossless, metadata and target size", suite.testJPEGXL)
         ]
         for (name, check) in checks {
             let before = failures

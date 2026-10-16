@@ -19,15 +19,16 @@ extension Engine {
         guard let flat = ctx.makeImage() else { throw DiceError.message("Could not prepare the output image.") }
         return flat
     }
-    /// Writes one still image in `format`; WebP goes through a temporary PNG and cwebp.
+    /// Writes one still image in `format`; WebP and JPEG XL go through a temporary PNG and cwebp or cjxl.
     /// The temporary PNG gets its own name, so it can never replace another result beside `output`.
     /// HDR pixels are written with an ISO gain map. `metadata`, when given, is written by ImageIO with the image.
     static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL, metadata: CGImageMetadata? = nil) throws {
         if format.isIcon { return try encodeIcon(image, format: format, to: output) }
         if format == .pdf { return try encodePDFPage(image, quality: options.quality, to: output) }
-        let destination = format == .webp ? FileManager.default.temporaryDirectory.appendingPathComponent("dice-webp-" + UUID().uuidString + ".png") : output
-        defer { if format == .webp { try? FileManager.default.removeItem(at: destination) } }
-        let type = format == .webp ? UTType.png.identifier : format.type
+        let viaPNG = format == .webp || format == .jxl
+        let destination = viaPNG ? FileManager.default.temporaryDirectory.appendingPathComponent("dice-\(format.ext)-" + UUID().uuidString + ".png") : output
+        defer { if viaPNG { try? FileManager.default.removeItem(at: destination) } }
+        let type = viaPNG ? UTType.png.identifier : format.type
         guard (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(type) == true,
               let dest = CGImageDestinationCreateWithURL(destination as CFURL, type as CFString, 1, nil) else { throw DiceError.message("This Mac cannot encode the selected format.") }
         // The AVIF encoder fails outright at quality 1.0, so its top setting is 0.99 (visually the same).
@@ -43,6 +44,11 @@ extension Engine {
             if options.webpLossless { args.append("-lossless") }
             args += [destination.path, "-o", output.path]
             _ = try run(toolsDirectory.appendingPathComponent("cwebp"), args)
+        }
+        if format == .jxl {
+            // Distance 0 is mathematically lossless; otherwise cjxl maps quality 0–100 to a distance.
+            let level = options.webpLossless ? ["-d", "0"] : ["-q", String(Int((min(1, max(0, options.quality)) * 100).rounded()))]
+            _ = try run(jxlEncoder, [destination.path, output.path] + level + ["--quiet"])
         }
     }
     static func frameDelay(_ source: CGImageSource, _ index: Int) -> Double {

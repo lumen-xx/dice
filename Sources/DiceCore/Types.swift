@@ -8,12 +8,14 @@ public enum DiceError: LocalizedError {
     public var errorDescription: String? { if case let .message(s) = self { return s }; return nil }
 }
 public enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Codable {
-    case original = "Same as original", jpeg = "JPEG", png = "PNG", heic = "HEIC", webp = "WebP", gif = "GIF", bmp = "BMP", tiff = "TIFF", avif = "AVIF", ico = "ICO", icns = "ICNS", pdf = "PDF"
+    case original = "Same as original", jpeg = "JPEG", png = "PNG", heic = "HEIC", webp = "WebP", gif = "GIF", bmp = "BMP", tiff = "TIFF", avif = "AVIF", jxl = "JPEG XL", ico = "ICO", icns = "ICNS", pdf = "PDF"
     public var id: String { rawValue }
-    public var ext: String { switch self { case .jpeg: return "jpg"; case .png: return "png"; case .heic: return "heic"; case .webp: return "webp"; case .gif: return "gif"; case .bmp: return "bmp"; case .tiff: return "tiff"; case .avif: return "avif"; case .ico: return "ico"; case .icns: return "icns"; case .pdf: return "pdf"; case .original: return "" } }
-    public var type: String { switch self { case .jpeg: return UTType.jpeg.identifier; case .png: return UTType.png.identifier; case .heic: return UTType.heic.identifier; case .webp: return "org.webmproject.webp"; case .gif: return UTType.gif.identifier; case .bmp: return UTType.bmp.identifier; case .tiff: return UTType.tiff.identifier; case .avif: return "public.avif"; case .ico: return UTType.ico.identifier; case .icns: return UTType.icns.identifier; case .pdf: return UTType.pdf.identifier; case .original: return "" } }
+    public var ext: String { switch self { case .jpeg: return "jpg"; case .png: return "png"; case .heic: return "heic"; case .webp: return "webp"; case .gif: return "gif"; case .bmp: return "bmp"; case .tiff: return "tiff"; case .avif: return "avif"; case .jxl: return "jxl"; case .ico: return "ico"; case .icns: return "icns"; case .pdf: return "pdf"; case .original: return "" } }
+    public var type: String { switch self { case .jpeg: return UTType.jpeg.identifier; case .png: return UTType.png.identifier; case .heic: return UTType.heic.identifier; case .webp: return "org.webmproject.webp"; case .gif: return UTType.gif.identifier; case .bmp: return UTType.bmp.identifier; case .tiff: return UTType.tiff.identifier; case .avif: return "public.avif"; case .jxl: return "public.jpeg-xl"; case .ico: return UTType.ico.identifier; case .icns: return UTType.icns.identifier; case .pdf: return UTType.pdf.identifier; case .original: return "" } }
     /// PDF pages embed opaque images as JPEG at this quality.
-    public var usesQuality: Bool { [.original, .jpeg, .heic, .webp, .avif, .pdf].contains(self) }
+    public var usesQuality: Bool { [.original, .jpeg, .heic, .webp, .avif, .jxl, .pdf].contains(self) }
+    /// Formats with a lossless mode behind the Lossless switch (`webpLossless`, named before JPEG XL arrived).
+    public var hasLosslessMode: Bool { self == .webp || self == .jxl }
     /// Formats ExifTool can copy image metadata into. BMP and icons have no room for it; PDF has its own document metadata.
     public var holdsMetadata: Bool { ![.bmp, .ico, .icns, .pdf, .original].contains(self) }
     /// Formats Dice writes as animations when the input is animated.
@@ -31,11 +33,11 @@ public enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Codable 
         let type = UTType(inputType)
         if ["public.heif", "public.heics", "public.avci"].contains(inputType) { return (.heic, false) }
         if inputType == "public.avis" { return (.avif, false) }
-        if type?.conforms(to: .rawImage) == true || ["public.jpeg-2000", "public.jpeg-xl", "public.mpo-image"].contains(inputType) { return (.jpeg, false) }
+        if type?.conforms(to: .rawImage) == true || ["public.jpeg-2000", "public.mpo-image"].contains(inputType) { return (.jpeg, false) }
         return (.png, false)
     }
     /// Whether a target file size can be met by lowering quality.
-    public func fitsTargetSize(lossless: Bool) -> Bool { usesQuality && self != .original && !(self == .webp && lossless) }
+    public func fitsTargetSize(lossless: Bool) -> Bool { usesQuality && self != .original && !(hasLosslessMode && lossless) }
     /// Whether the quality setting changes the output for this input type.
     public func usesQuality(forInputType inputType: String) -> Bool {
         self == .original ? OutputFormat.matching(inputType: inputType).format.usesQuality : usesQuality

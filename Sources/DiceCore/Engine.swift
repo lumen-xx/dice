@@ -9,7 +9,8 @@ public enum Engine {
         return Bundle.main.resourceURL!.appendingPathComponent("Tools")
     }
     public static func canEncode(_ format: OutputFormat) -> Bool {
-        format == .original || format == .webp || format == .pdf || (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(format.type) == true
+        if format == .jxl { return FileManager.default.isExecutableFile(atPath: jxlEncoder.path) }
+        return format == .original || format == .webp || format == .pdf || (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(format.type) == true
     }
     /// Reads the size from disk each time; URL resource values are cached and go stale when a file is rewritten.
     public static func fileSize(_ url: URL) -> Int64 { ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0 }
@@ -174,7 +175,7 @@ public enum Engine {
         if options.metadataOnly {
             let inputType = inputType
             guard metadataOnlyTypes.contains(inputType) else {
-                throw DiceError.message("Metadata-only removal supports JPEG, PNG, HEIC, WebP, TIFF, AVIF, GIF and DNG. Convert this image to one of those formats to remove personal metadata.")
+                throw DiceError.message("Metadata-only removal supports JPEG, PNG, HEIC, WebP, TIFF, AVIF, JPEG XL, GIF and DNG. Convert this image to one of those formats to remove personal metadata.")
             }
             guard options.stripMetadata else { throw DiceError.message("Enable metadata removal for metadata-only mode.") }
             try FileManager.default.copyItem(at: input, to: output)
@@ -277,7 +278,9 @@ public enum Engine {
         } catch { try? FileManager.default.removeItem(at: folder); throw error }
     }
     /// Types whose metadata ExifTool can remove in place without touching pixels.
-    static let metadataOnlyTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "org.webmproject.webp", UTType.tiff.identifier, "public.avif", UTType.gif.identifier, "com.adobe.raw-image"]
+    static let metadataOnlyTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "org.webmproject.webp", UTType.tiff.identifier, "public.avif", "public.jpeg-xl", UTType.gif.identifier, "com.adobe.raw-image"]
+    /// cjxl lives in its own folder with its own libraries (see scripts/vendor-jxl.py).
+    static var jxlEncoder: URL { toolsDirectory.appendingPathComponent("jxl/bin/cjxl") }
     /// Removes personal metadata in place, keeping the colour profile and orientation.
     /// An HDR JPEG keeps its gain map (an MPF trailer image and its APP2 block), which `-all=` would delete; if the
     /// gain map still goes missing, the file is left alone with an error rather than silently losing HDR.
