@@ -230,7 +230,7 @@ struct DiceView: View {
             Picker("Default format", selection: $model.preferences.exportFormat) {
                 ForEach(OutputFormat.allCases.filter { $0 != .original }) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) }
             }.tint(.primary).disabled(!model.preferences.useExportFormat)
-            Picker("Default resize", selection: $model.preferences.defaultResize) { ForEach(ResizeMode.allCases.filter { $0 != .fit }) { Text($0.rawValue).tag($0) } }.tint(.primary)
+            Picker("Default resize", selection: $model.preferences.defaultResize) { ForEach([ResizeMode.original, .edge, .percent]) { Text($0.rawValue).tag($0) } }.tint(.primary)
             if model.preferences.defaultResize == .edge { HStack { Text("Longest edge"); number($model.preferences.defaultEdge); Text("px") } }
             if model.preferences.defaultResize == .percent { HStack { Text("Scale"); number($model.preferences.defaultPercent); Text("%") } }
             HStack { Text("Default quality"); Slider(value: $model.preferences.defaultQuality, in: 0.1...1); Text("\(Int(model.preferences.defaultQuality * 100))%").monospacedDigit() }
@@ -294,7 +294,10 @@ struct DiceView: View {
                 Picker("Resize", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
                 if model.options.resize == .edge { HStack { Text("Longest edge"); number($model.options.edge); Text("px") } }
                 if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
-                if model.options.resize == .fit { HStack { number($model.options.width); Text("×"); number($model.options.height); Text("px") } }
+                if model.options.resize == .fit || model.options.resize == .fill { HStack { number($model.options.width, label: "Width"); Text("×"); number($model.options.height, label: "Height"); Text("px") } }
+                if model.options.resize == .width { HStack { Text("Width"); number($model.options.width, label: "Width"); Text("px") } }
+                if model.options.resize == .height { HStack { Text("Height"); number($model.options.height, label: "Height"); Text("px") } }
+                shapeRow
                 if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
                 if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { compressionRow }
                 if writesPNG { HStack(spacing: 6) { Toggle("Optimise PNG", isOn: $model.options.optimizePNG); InfoTip("Recompresses PNG files losslessly with oxipng: smaller files, identical pixels."); Spacer(minLength: 0) } }
@@ -319,6 +322,34 @@ struct DiceView: View {
                 Spacer(minLength: 0)
             } else { Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() }
         }
+    }
+    /// Rotation, flips, crop, enlarging, scale sets and PDF resolution behind one menu, so the popover keeps its size.
+    var shapeRow: some View {
+        HStack(spacing: 6) {
+            Text("Shape")
+            Menu {
+                Picker("Rotate", selection: $model.options.rotation) { Text("None").tag(0); Text("90° clockwise").tag(90); Text("180°").tag(180); Text("90° anticlockwise").tag(270) }
+                Toggle("Flip horizontally", isOn: $model.options.flipHorizontal)
+                Toggle("Flip vertically", isOn: $model.options.flipVertical)
+                Picker("Crop", selection: $model.options.crop) { ForEach(CropAspect.allCases) { Text($0 == .none ? "None" : $0.rawValue + " (centred)").tag($0) } }
+                Divider()
+                Toggle("Allow enlarging", isOn: $model.options.upscale)
+                Toggle("Also save @2x and @1x", isOn: $model.options.scaleSet)
+                if model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) {
+                    Picker("PDF resolution", selection: $model.options.pdfDPI) { ForEach([72, 144, 300, 600], id: \.self) { Text("\($0) dpi").tag($0) } }
+                }
+            } label: { Text(shapeLabel).lineLimit(1) }
+                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Rotate, flip, crop, enlarge, or save @1x–@3x sets")
+            if model.options.scaleSet { InfoTip("The result is the @3x image; @2x and @1x are saved beside it in one folder.") }
+            Spacer(minLength: 0)
+        }
+    }
+    var shapeLabel: String {
+        var parts = model.options.shapeSummary
+        if model.options.upscale { parts.append("Enlarge") }
+        if model.options.scaleSet { parts.append("@1–3x") }
+        if model.options.pdfDPI != 144 && model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) { parts.append("\(model.options.pdfDPI) dpi") }
+        return parts.isEmpty ? "As is" : parts.joined(separator: ", ")
     }
     var writesPNG: Bool { model.items.contains { model.options.format == .png || (model.options.format == .original && OutputFormat.matching(inputType: $0.info?.type ?? "").format == .png) } }
     /// "Same as original" only shows Quality when some image in the batch is written in a lossy format.

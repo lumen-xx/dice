@@ -107,7 +107,8 @@ extension Engine {
         ctx.closePDF()
     }
     /// Writes an animation in `format`: GIF, APNG and HEIC sequences through ImageIO, WebP through img2webp.
-    static func encodeAnimation(_ source: CGImageSource, frames total: Int, edge: Int, format: OutputFormat, options: Options, to output: URL) throws {
+    static func encodeAnimation(_ source: CGImageSource, frames total: Int, geometry: Geometry, format: OutputFormat, options: Options, to output: URL) throws {
+        func frame(_ index: Int) throws -> CGImage { try shape(try frameImage(source, index, maxPixelSize: geometry.decodeEdge), geometry, options: options) }
         if format == .webp {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dice-frames-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -115,16 +116,16 @@ extension Engine {
             var args = ["-loop", "0", options.webpLossless ? "-lossless" : "-lossy", "-q", String(Int(options.quality * 100))]
             for index in 0..<total {
                 try autoreleasepool {
-                    let frame = folder.appendingPathComponent(String(format: "%05d.png", index))
+                    let file = folder.appendingPathComponent(String(format: "%05d.png", index))
                     var still = options; still.optimizePNG = false
-                    try encode(try frameImage(source, index, maxPixelSize: edge), format: .png, options: still, to: frame)
-                    args += ["-d", String(max(10, Int((frameDelay(source, index) * 1000).rounded()))), frame.path]
+                    try encode(try frame(index), format: .png, options: still, to: file)
+                    args += ["-d", String(max(10, Int((frameDelay(source, index) * 1000).rounded()))), file.path]
                 }
             }
             _ = try run(toolsDirectory.appendingPathComponent("img2webp"), args + ["-o", output.path])
             return
         }
-        let (type, file, frame, loop, delay): (String, CFString, CFString, CFString, CFString) = switch format {
+        let (type, file, frameKey, loop, delay): (String, CFString, CFString, CFString, CFString) = switch format {
         case .png: (UTType.png.identifier, kCGImagePropertyPNGDictionary, kCGImagePropertyPNGDictionary, kCGImagePropertyAPNGLoopCount, kCGImagePropertyAPNGDelayTime)
         case .heic: ("public.heics", kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSLoopCount, kCGImagePropertyHEICSDelayTime)
         default: (UTType.gif.identifier, kCGImagePropertyGIFDictionary, kCGImagePropertyGIFDictionary, kCGImagePropertyGIFLoopCount, kCGImagePropertyGIFDelayTime)
@@ -133,8 +134,8 @@ extension Engine {
         CGImageDestinationSetProperties(dest, [file: [loop: 0]] as CFDictionary)
         for index in 0..<total {
             try autoreleasepool {
-                let image = try frameImage(source, index, maxPixelSize: edge)
-                CGImageDestinationAddImage(dest, image, [frame: [delay: frameDelay(source, index)], kCGImageDestinationLossyCompressionQuality: min(1, max(0, options.quality))] as CFDictionary)
+                let image = try frame(index)
+                CGImageDestinationAddImage(dest, image, [frameKey: [delay: frameDelay(source, index)], kCGImageDestinationLossyCompressionQuality: min(1, max(0, options.quality))] as CFDictionary)
             }
         }
         guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the animated \(format.rawValue).") }
@@ -142,18 +143,18 @@ extension Engine {
     /// Animated input → an animation when the format can hold one and `keepAnimation`; otherwise a folder of numbered frames, or just the first frame.
     static func convertAnimated(_ input: URL, source: CGImageSource, format: OutputFormat, options: Options, info: ImageInfo, directory: URL) throws -> ConversionResult {
         let total = info.frames
-        let edge = try options.longestEdge(width: info.width, height: info.height)
+        let geometry = try options.geometry(width: info.width, height: info.height)
         let stem = input.deletingPathExtension().lastPathComponent
         if format.animates && options.keepAnimation {
             let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: format == .heic ? "heics" : format.ext)
-            do { try encodeAnimation(source, frames: total, edge: edge, format: format, options: options, to: output) }
+            do { try encodeAnimation(source, frames: total, geometry: geometry, format: format, options: options, to: output) }
             catch { try? FileManager.default.removeItem(at: output); throw error }
             return ConversionResult(url: output, bytes: fileSize(output), note: "Animation kept (\(total) frames)")
         }
         let note = noAlpha.contains(format) ? "Transparency is flattened onto \(hex(options.flattenColor))" : nil
         func still(_ index: Int, to url: URL) throws {
             try autoreleasepool {
-                var frame = try frameImage(source, index, maxPixelSize: edge)
+                var frame = try shape(try frameImage(source, index, maxPixelSize: geometry.decodeEdge), geometry, options: options)
                 if noAlpha.contains(format) { frame = try flatten(frame, color: options.flattenColor) }
                 try encode(frame, format: format, options: options, to: url)
             }
@@ -183,7 +184,44 @@ extension Engine {
     /// Resamples to a longest edge, keeping the image's RGB colour space.
     static func resample(_ image: CGImage, longestEdge: Int) throws -> CGImage {
         let factor = Double(longestEdge) / Double(max(image.width, image.height))
-        let w = max(1, Int((Double(image.width) * factor).rounded())), h = max(1, Int((Double(image.height) * factor).rounded()))
+        return try resample(image, width: max(1, Int((Double(image.width) * factor).rounded())), height: max(1, Int((Double(image.height) * factor).rounded())))
+    }
+    /// Applies a `Geometry` to a decoded image: rotation and flips, the centred crop, then the exact output size.
+    static func shape(_ image: CGImage, _ geometry: Geometry, options: Options) throws -> CGImage {
+        var out = image
+        if geometry.reorients { out = try reorient(out, rotation: options.normalizedRotation, flipHorizontal: options.flipHorizontal, flipVertical: options.flipVertical) }
+        if let aspect = geometry.crop {
+            var w = Double(out.width), h = Double(out.height)
+            if w / h > aspect { w = h * aspect } else { h = w / aspect }
+            let rect = CGRect(x: ((Double(out.width) - w) / 2).rounded(), y: ((Double(out.height) - h) / 2).rounded(), width: max(1, w.rounded()), height: max(1, h.rounded()))
+            guard let cropped = out.cropping(to: rect) else { throw DiceError.message("Could not crop the image.") }
+            out = cropped
+        }
+        if out.width != geometry.width || out.height != geometry.height { out = try resample(out, width: geometry.width, height: geometry.height) }
+        return out
+    }
+    /// Clockwise rotation by a multiple of 90°, then mirroring, keeping the image's RGB colour space.
+    static func reorient(_ image: CGImage, rotation: Int, flipHorizontal: Bool, flipVertical: Bool) throws -> CGImage {
+        let w = CGFloat(image.width), h = CGFloat(image.height)
+        let turned = rotation % 180 == 90
+        let (nw, nh) = turned ? (h, w) : (w, h)
+        // Core Graphics has y pointing up, so a clockwise turn is a negative angle.
+        var t: CGAffineTransform = switch rotation {
+        case 90: CGAffineTransform(translationX: 0, y: w).rotated(by: -.pi / 2)
+        case 180: CGAffineTransform(translationX: w, y: h).rotated(by: .pi)
+        case 270: CGAffineTransform(translationX: h, y: 0).rotated(by: .pi / 2)
+        default: .identity
+        }
+        if flipHorizontal { t = t.concatenating(CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: nw, ty: 0)) }
+        if flipVertical { t = t.concatenating(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: nh)) }
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let ctx = CGContext(data: nil, width: Int(nw), height: Int(nh), bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not rotate the image.") }
+        ctx.concatenate(t); ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let turnedImage = ctx.makeImage() else { throw DiceError.message("Could not rotate the image.") }
+        return turnedImage
+    }
+    /// Resamples to an exact size, keeping the image's RGB colour space.
+    static func resample(_ image: CGImage, width w: Int, height h: Int) throws -> CGImage {
         let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not resize the image.") }
         ctx.interpolationQuality = .high; ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))

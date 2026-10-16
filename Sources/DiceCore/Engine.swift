@@ -137,8 +137,8 @@ public enum Engine {
     /// Resolution-only batch action. Already-small inputs are left untouched.
     public static func resize(_ input: URL, options: Options, directory: URL, page: Int = 1) throws -> ConversionResult? {
         let info = try inspect(input, page: page)
-        let target = try options.longestEdge(width: info.width, height: info.height)
-        guard target < max(info.width, info.height) else { return nil }
+        let (w, h) = displaySize(input, info: info, options: options)
+        guard !(try options.geometry(width: w, height: h, vector: DocumentImage.isDocument(input))).isIdentity(width: w, height: h) else { return nil }
         var resize = options
         resize.format = .original; resize.metadataOnly = false; resize.stripMetadata = false
         resize.quality = 1; resize.webpLossless = true; resize.keepAnimation = true
@@ -175,8 +175,12 @@ public enum Engine {
         if let source, !document, count == 1, imageInfo.frames > 1, inputType != UTType.tiff.identifier {
             return try convertAnimated(input, source: source, format: format, options: options, info: imageInfo, directory: directory)
         }
-        let edge = try options.longestEdge(width: imageInfo.width, height: imageInfo.height, upscale: document)
-        var image = document ? try DocumentImage.render(input, page: page, edge: edge) : try previewImage(input, maxPixelSize: edge, page: page)
+        let (displayW, displayH) = displaySize(input, info: imageInfo, options: options)
+        let geometry = try options.geometry(width: displayW, height: displayH, vector: document)
+        if options.scaleSet && !format.isIcon && format != .pdf {
+            return try convertScaleSet(input, options: options, geometry: geometry, directory: directory, page: page, stem: stem)
+        }
+        var image = try shape(document ? try DocumentImage.render(input, page: page, edge: geometry.decodeEdge) : try previewImage(input, maxPixelSize: geometry.decodeEdge, page: page), geometry, options: options)
         if noAlpha.contains(format) { image = try flatten(image, color: options.flattenColor); notes.append("Transparency is flattened onto \(hex(options.flattenColor))") }
         if !options.stripMetadata && !document && !format.holdsMetadata { notes.append("Metadata isn't copied into \(format.rawValue), so none was kept") }
         let target: Int64? = options.useTargetSize && format.fitsTargetSize(lossless: options.webpLossless) ? Int64(max(1, options.targetKB)) * 1000 : nil
@@ -207,12 +211,44 @@ public enum Engine {
                 guard target - metadataBytes > 0 else { throw DiceError.message("The kept metadata alone is larger than \(options.targetKB) KB. Remove personal metadata or choose a larger target.") }
                 try write(budget: target - metadataBytes)
             }
-            let sameShape = count == 1 && format.type == inputType && image.width == imageInfo.width && image.height == imageInfo.height
+            let sameShape = count == 1 && format.type == inputType && geometry.isIdentity(width: imageInfo.width, height: imageInfo.height)
             if options.keepSmallerOriginal && !document && sameShape && fileSize(output) >= fileSize(input), let kept = try keepOriginal(input, at: output, removingMetadata: options.stripMetadata) {
                 return ConversionResult(url: output, bytes: fileSize(output), note: kept)
             }
             return ConversionResult(url: output, bytes: fileSize(output), note: notes.isEmpty ? nil : notes.joined(separator: ". "))
         } catch { try? FileManager.default.removeItem(at: output); throw error }
+    }
+    /// The size an image is planned at: its display size, or for PDF pages the size at `pdfDPI`
+    /// (inspection reports pages at 144 dpi).
+    static func displaySize(_ input: URL, info: ImageInfo, options: Options) -> (Int, Int) {
+        guard DocumentImage.isPDF(input), options.pdfDPI != 144 else { return (info.width, info.height) }
+        let factor = Double(min(1200, max(18, options.pdfDPI))) / 144
+        return (max(1, Int((Double(info.width) * factor).rounded())), max(1, Int((Double(info.height) * factor).rounded())))
+    }
+    /// The planned output as @3x, plus @2x and @1x, in one folder: `name@3x.ext`, `name@2x.ext`, `name.ext`.
+    static func convertScaleSet(_ input: URL, options: Options, geometry: Geometry, directory: URL, page: Int, stem: String) throws -> ConversionResult {
+        let folder = uniqueURL(in: directory, stem: stem, ext: "")
+        let name = String(stem.dropLast(options.fileSuffix.count))
+        let scratch = directory.appendingPathComponent(".dice-scale-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        do {
+            var bytes: Int64 = 0, notes: [String] = [], preview: URL?
+            for multiple in [3, 2, 1] {
+                var single = options
+                single.scaleSet = false; single.resize = options.resize == .fill ? .fill : .fit; single.upscale = true
+                single.width = max(1, Int((Double(geometry.width) * Double(multiple) / 3).rounded()))
+                single.height = max(1, Int((Double(geometry.height) * Double(multiple) / 3).rounded()))
+                let result = try convert(input, options: single, directory: scratch, page: page)
+                let file = folder.appendingPathComponent(name + (multiple == 1 ? "" : "@\(multiple)x") + "." + result.url.pathExtension)
+                try FileManager.default.moveItem(at: result.url, to: file)
+                bytes += result.bytes; preview = preview ?? file
+                if let note = result.note, multiple == 3 { notes.append(note) }
+            }
+            notes.append("@3x, @2x and @1x")
+            return ConversionResult(url: folder, bytes: bytes, note: notes.joined(separator: ". "), previewURL: preview)
+        } catch { try? FileManager.default.removeItem(at: folder); throw error }
     }
     /// Types whose metadata ExifTool can remove in place without touching pixels.
     static let metadataOnlyTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "org.webmproject.webp", UTType.tiff.identifier, "public.avif", UTType.gif.identifier, "com.adobe.raw-image"]

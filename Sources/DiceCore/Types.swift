@@ -42,8 +42,28 @@ public enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Codable 
     }
 }
 public enum ResizeMode: String, CaseIterable, Identifiable, Sendable, Codable {
-    case original = "Original size", edge = "Longest edge", percent = "Percentage", fit = "Fit within dimensions"
+    case original = "Original size", edge = "Longest edge", percent = "Percentage", fit = "Fit within dimensions", width = "Width", height = "Height", fill = "Fill and crop"
     public var id: String { rawValue }
+}
+/// Centred crop to an aspect ratio, applied after rotation and before resizing.
+public enum CropAspect: String, CaseIterable, Identifiable, Sendable, Codable {
+    case none = "No crop", square = "1:1", portrait = "4:5", standard = "4:3", photo = "3:2", wide = "16:9", story = "9:16"
+    public var id: String { rawValue }
+    /// Width divided by height.
+    public var ratio: Double? {
+        switch self { case .none: nil; case .square: 1; case .portrait: 0.8; case .standard: 4.0 / 3; case .photo: 1.5; case .wide: 16.0 / 9; case .story: 9.0 / 16 }
+    }
+}
+/// How one image is reshaped: decode (or render) the source at `decodeEdge`, rotate and flip, centre-crop to `crop`,
+/// then resample to exactly `width` × `height`.
+public struct Geometry: Equatable, Sendable {
+    public let decodeEdge: Int
+    public let width: Int
+    public let height: Int
+    public let crop: Double?
+    public let reorients: Bool
+    /// True when the output is the source unchanged in size and orientation.
+    public func isIdentity(width w: Int, height h: Int) -> Bool { !reorients && crop == nil && width == w && height == h }
 }
 public struct Options: Sendable, Codable {
     public var format: OutputFormat = .original
@@ -77,6 +97,17 @@ public struct Options: Sendable, Codable {
     public var keepSmallerOriginal = true
     /// PDF output: one combined PDF for the batch instead of one per image.
     public var combinePDF = false
+    /// Raster images may be scaled above their own size (vectors always render at the requested size).
+    public var upscale = false
+    /// Clockwise rotation in degrees: 0, 90, 180 or 270. Applied before flipping and cropping.
+    public var rotation = 0
+    public var flipHorizontal = false
+    public var flipVertical = false
+    public var crop: CropAspect = .none
+    /// Treat the output as @3x and also save @2x and @1x, in a folder.
+    public var scaleSet = false
+    /// PDF pages render at this resolution for "Original size" (and as the base for percentages).
+    public var pdfDPI = 144
     public init() {}
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -101,21 +132,78 @@ public struct Options: Sendable, Codable {
         optimizePNG = try c.decodeIfPresent(Bool.self, forKey: .optimizePNG) ?? optimizePNG
         keepSmallerOriginal = try c.decodeIfPresent(Bool.self, forKey: .keepSmallerOriginal) ?? keepSmallerOriginal
         combinePDF = try c.decodeIfPresent(Bool.self, forKey: .combinePDF) ?? combinePDF
+        upscale = try c.decodeIfPresent(Bool.self, forKey: .upscale) ?? upscale
+        rotation = try c.decodeIfPresent(Int.self, forKey: .rotation) ?? rotation
+        flipHorizontal = try c.decodeIfPresent(Bool.self, forKey: .flipHorizontal) ?? flipHorizontal
+        flipVertical = try c.decodeIfPresent(Bool.self, forKey: .flipVertical) ?? flipVertical
+        crop = try c.decodeIfPresent(CropAspect.self, forKey: .crop) ?? crop
+        scaleSet = try c.decodeIfPresent(Bool.self, forKey: .scaleSet) ?? scaleSet
+        pdfDPI = try c.decodeIfPresent(Int.self, forKey: .pdfDPI) ?? pdfDPI
     }
     /// Choices that only make sense for the images they were made for; a new session starts without them.
-    public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false }
-    /// Target longest edge. Raster images never grow; vector documents (`upscale`) render at any requested size.
-    public func longestEdge(width w: Int, height h: Int, upscale: Bool = false) throws -> Int {
-        let longest = max(w,h)
+    public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false; rotation = 0; flipHorizontal = false; flipVertical = false }
+    /// Rotation, flips and crop, if any; empty when the image keeps its shape.
+    public var shapeSummary: [String] {
+        var parts: [String] = []
+        if normalizedRotation != 0 { parts.append("\(normalizedRotation)°") }
+        if flipHorizontal { parts.append("Flipped ↔") }
+        if flipVertical { parts.append("Flipped ↕") }
+        if crop != .none { parts.append(crop.rawValue) }
+        return parts
+    }
+    public var normalizedRotation: Int { ((rotation % 360) + 360) % 360 / 90 * 90 }
+    /// Largest output side Dice will produce.
+    public static let maxSide = 32768
+    /// Plans the output for an image that displays at `w` × `h`. Raster images never grow unless `upscale`;
+    /// vector documents (`vector`) render at any requested size.
+    public func geometry(width w: Int, height h: Int, vector: Bool = false) throws -> Geometry {
+        guard w > 0, h > 0 else { throw DiceError.message("This image has no pixels.") }
+        let turned = normalizedRotation % 180 == 90
+        let (rw, rh) = turned ? (Double(h), Double(w)) : (Double(w), Double(h))
+        var aspect = crop.ratio
+        if resize == .fill {
+            guard width > 0 && height > 0 else { throw DiceError.message("Width and height must be greater than zero.") }
+            aspect = Double(width) / Double(height)
+        }
+        var (cw, ch) = (rw, rh)
+        if let aspect { if cw / ch > aspect { cw = ch * aspect } else { ch = cw / aspect } }
+        let grow = upscale || vector
+        let factor: Double
         switch resize {
-        case .original: return longest
-        case .edge: guard edge > 0 else { throw DiceError.message("Enter a longest edge greater than zero.") }; return upscale ? edge : min(longest, edge)
-        case .percent: guard percent > 0 && percent <= 100 else { throw DiceError.message("Percentage must be between 1 and 100.") }; return max(1, Int(Double(longest) * Double(percent) / 100))
+        case .original: factor = 1
+        case .edge:
+            guard edge > 0 else { throw DiceError.message("Enter a longest edge greater than zero.") }
+            factor = Double(edge) / max(cw, ch)
+        case .percent:
+            guard percent > 0 else { throw DiceError.message("Percentage must be greater than zero.") }
+            guard percent <= 100 || grow else { throw DiceError.message("Percentage must be between 1 and 100. Turn on Allow enlarging to go above 100.") }
+            guard percent <= 1000 else { throw DiceError.message("Percentage can be at most 1000.") }
+            factor = Double(percent) / 100
         case .fit:
             guard width > 0 && height > 0 else { throw DiceError.message("Width and height must be greater than zero.") }
-            let factor = min(Double(width)/Double(w), Double(height)/Double(h))
-            return max(1, Int(Double(longest) * (upscale ? factor : min(1, factor))))
+            factor = min(Double(width) / cw, Double(height) / ch)
+        case .width:
+            guard width > 0 else { throw DiceError.message("Enter a width greater than zero.") }
+            factor = Double(width) / cw
+        case .height:
+            guard height > 0 else { throw DiceError.message("Enter a height greater than zero.") }
+            factor = Double(height) / ch
+        case .fill: factor = Double(width) / cw
         }
+        let scale = grow ? factor : min(1, factor)
+        var tw = max(1, Int((cw * scale).rounded())), th = max(1, Int((ch * scale).rounded()))
+        // Fill and crop gives the exact size whenever the image is large enough (or may grow).
+        if resize == .fill && scale == factor { tw = width; th = height }
+        guard tw <= Self.maxSide, th <= Self.maxSide else { throw DiceError.message("The output would be larger than \(Self.maxSide) pixels on a side.") }
+        let longest = Double(max(w, h))
+        let decode = max(1, Int(ceil(longest * (vector ? scale : min(1, scale)))))
+        let cropped = aspect != nil && (Int(cw.rounded()) != Int(rw) || Int(ch.rounded()) != Int(rh))
+        return Geometry(decodeEdge: decode, width: tw, height: th, crop: cropped ? aspect : nil, reorients: normalizedRotation != 0 || flipHorizontal || flipVertical)
+    }
+    /// Target longest edge of the output.
+    public func longestEdge(width w: Int, height h: Int, upscale vector: Bool = false) throws -> Int {
+        let g = try geometry(width: w, height: h, vector: vector)
+        return max(g.width, g.height)
     }
 }
 public struct MetadataRow: Identifiable, Sendable, Codable {

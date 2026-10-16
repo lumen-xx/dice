@@ -13,7 +13,7 @@ Dice is not notarized yet.
 
 ## Use
 
-Drop images, PDFs, SVGs or folders on the window, paste with ⌘V, or right-click them in Finder → **Edit with Dice**. Adjust the settings (sliders icon), then press ▶. Dice writes JPEG, PNG, HEIC, WebP, AVIF, GIF, TIFF, BMP, ICO, ICNS and PDF, keeps animations as GIF, APNG, animated WebP or HEIC, and can combine a batch into one PDF. Results are saved beside the originals, in a default folder, or over the originals (moved to the Trash) if you choose **Replace originals**.
+Drop images, PDFs, SVGs or folders on the window, paste with ⌘V, or right-click them in Finder → **Edit with Dice**. Adjust the settings (sliders icon), then press ▶. Dice writes JPEG, PNG, HEIC, WebP, AVIF, GIF, TIFF, BMP, ICO, ICNS and PDF, keeps animations as GIF, APNG, animated WebP or HEIC, and can combine a batch into one PDF. Resize by longest edge, percentage, width, height, fit or fill-and-crop; rotate, flip, crop to an aspect ratio, and save @1x–@3x sets from the Shape menu. Results are saved beside the originals, in a default folder, or over the originals (moved to the Trash) if you choose **Replace originals**.
 
 ![Image editor](docs/image.png)
 ![Metadata viewer](docs/metadata.png)

@@ -636,6 +636,106 @@ final class EngineTests {
             try FileManager.default.removeItem(at: input)
         }
     }
+    func testGeometryModes() throws {
+        func plan(_ w: Int, _ h: Int, vector: Bool = false, _ change: (inout Options) -> Void) throws -> (Int, Int) {
+            var o = Options(); change(&o); let g = try o.geometry(width: w, height: h, vector: vector); return (g.width, g.height)
+        }
+        XCTAssertTrue(try plan(800, 600) { $0.resize = .width; $0.width = 400 } == (400, 300))
+        XCTAssertTrue(try plan(800, 600) { $0.resize = .height; $0.height = 300 } == (400, 300))
+        XCTAssertTrue(try plan(800, 600) { $0.resize = .width; $0.width = 1600 } == (800, 600))
+        XCTAssertTrue(try plan(800, 600) { $0.resize = .width; $0.width = 1600; $0.upscale = true } == (1600, 1200))
+        XCTAssertTrue(try plan(2000, 1200) { $0.resize = .fill; $0.width = 1080; $0.height = 1080 } == (1080, 1080))
+        XCTAssertTrue(try plan(1600, 900) { $0.resize = .fill; $0.width = 1080; $0.height = 1080 } == (900, 900))
+        XCTAssertTrue(try plan(500, 400) { $0.resize = .fill; $0.width = 1080; $0.height = 1080 } == (400, 400))
+        XCTAssertTrue(try plan(500, 400) { $0.resize = .fill; $0.width = 1080; $0.height = 1080; $0.upscale = true } == (1080, 1080))
+        XCTAssertTrue(try plan(800, 600) { $0.resize = .percent; $0.percent = 200; $0.upscale = true } == (1600, 1200))
+        XCTAssertTrue(try plan(80, 60, vector: true) { $0.resize = .percent; $0.percent = 300 } == (240, 180))
+        XCTAssertThrowsError(try plan(800, 600) { $0.resize = .percent; $0.percent = 200 })
+        XCTAssertTrue(try plan(800, 600) { $0.rotation = 90; $0.resize = .width; $0.width = 300 } == (300, 400))
+        XCTAssertTrue(try plan(800, 600) { $0.crop = .square } == (600, 600))
+        XCTAssertTrue(try plan(800, 600) { $0.crop = .wide; $0.resize = .edge; $0.edge = 400 } == (400, 225))
+        XCTAssertThrowsError(try plan(800, 600) { $0.resize = .width; $0.width = 40000; $0.upscale = true })
+        var o = Options(); o.rotation = 180; o.crop = .square
+        XCTAssertFalse(try o.geometry(width: 10, height: 10).isIdentity(width: 10, height: 10))
+        o.rotation = 0; XCTAssertTrue(try o.geometry(width: 10, height: 10).isIdentity(width: 10, height: 10))
+        o.rotation = 90; o.resetSessionChoices(); XCTAssertEqual(o.rotation, 0); XCTAssertEqual(o.crop, .square)
+    }
+    /// 40 × 20: left half red, right half blue.
+    func halves() throws -> URL {
+        let url = directory.appendingPathComponent("halves.png")
+        let c = CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.setFillColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)); c.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        c.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)); c.fill(CGRect(x: 20, y: 0, width: 20, height: 20))
+        write([c.makeImage()!], to: url, type: .png); return url
+    }
+    func testRotateFlipAndCrop() throws {
+        let input = try halves()
+        func out(_ change: (inout Options) -> Void) throws -> CGImage {
+            var o = Options(); o.format = .png; change(&o)
+            return try Engine.previewImage(try Engine.convert(input, options: o, directory: directory).url, maxPixelSize: 100)
+        }
+        func red(_ p: [UInt8]) -> Bool { p[0] > 200 && p[2] < 50 }
+        func blue(_ p: [UInt8]) -> Bool { p[2] > 200 && p[0] < 50 }
+        // Clockwise: the left (red) half ends up on top.
+        let cw = try out { $0.rotation = 90 }
+        XCTAssertEqual(cw.width, 20); XCTAssertEqual(cw.height, 40)
+        XCTAssertTrue(red(rgba(cw, x: 10, y: 5))); XCTAssertTrue(blue(rgba(cw, x: 10, y: 35)))
+        let ccw = try out { $0.rotation = 270 }
+        XCTAssertTrue(blue(rgba(ccw, x: 10, y: 5))); XCTAssertTrue(red(rgba(ccw, x: 10, y: 35)))
+        let half = try out { $0.rotation = 180 }
+        XCTAssertTrue(blue(rgba(half, x: 5, y: 10))); XCTAssertTrue(red(rgba(half, x: 35, y: 10)))
+        let flipped = try out { $0.flipHorizontal = true }
+        XCTAssertTrue(blue(rgba(flipped, x: 5, y: 10))); XCTAssertTrue(red(rgba(flipped, x: 35, y: 10)))
+        // Rotate, then flip vertically: red moves from the top to the bottom.
+        let both = try out { $0.rotation = 90; $0.flipVertical = true }
+        XCTAssertTrue(blue(rgba(both, x: 10, y: 5))); XCTAssertTrue(red(rgba(both, x: 10, y: 35)))
+        let square = try out { $0.crop = .square }
+        XCTAssertEqual(square.width, 20); XCTAssertEqual(square.height, 20)
+        XCTAssertTrue(red(rgba(square, x: 3, y: 10))); XCTAssertTrue(blue(rgba(square, x: 16, y: 10)))
+        // Same format and size: keeping the smaller original must not undo the rotation.
+        let jpeg = directory.appendingPathComponent("halves.jpg")
+        let dest = CGImageDestinationCreateWithURL(jpeg as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, try Engine.previewImage(input, maxPixelSize: 40), [kCGImageDestinationLossyCompressionQuality: 0.3] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        var o = Options(); o.rotation = 180; o.keepSmallerOriginal = true; o.quality = 1
+        let kept = try Engine.convert(jpeg, options: o, directory: directory)
+        XCTAssertEqual(kept.url.pathExtension, "jpg"); XCTAssertFalse(kept.note?.contains("Kept the original") == true)
+        XCTAssertTrue(blue(rgba(try Engine.previewImage(kept.url, maxPixelSize: 100), x: 5, y: 10)))
+    }
+    func testFillUpscaleScaleSetsAndPDFResolution() throws {
+        let photo = try fixture(name: "photo", width: 300, height: 200, format: UTType.png.identifier)
+        var o = Options(); o.format = .png; o.resize = .fill; o.width = 100; o.height = 100
+        XCTAssertTrue(dimensions(try Engine.convert(photo, options: o, directory: directory).url) == (100, 100))
+        o = Options(); o.format = .jpeg; o.resize = .percent; o.percent = 200; o.upscale = true
+        XCTAssertTrue(dimensions(try Engine.convert(photo, options: o, directory: directory).url) == (600, 400))
+        o = Options(); o.format = .png; o.scaleSet = true
+        let set = try Engine.convert(photo, options: o, directory: directory)
+        XCTAssertTrue(set.isFolder); XCTAssertEqual(set.url.lastPathComponent, "photo-dice")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: set.url.path).sorted(), ["photo.png", "photo@2x.png", "photo@3x.png"])
+        XCTAssertTrue(dimensions(set.url.appendingPathComponent("photo@3x.png")) == (300, 200))
+        XCTAssertTrue(dimensions(set.url.appendingPathComponent("photo@2x.png")) == (200, 133))
+        XCTAssertTrue(dimensions(set.url.appendingPathComponent("photo.png")) == (100, 67))
+        XCTAssertTrue(set.note?.contains("@3x, @2x and @1x") == true)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(".dice-") }.count, 0)
+        o.resize = .fill; o.width = 90; o.height = 90
+        let squares = try Engine.convert(photo, options: o, directory: directory)
+        XCTAssertTrue(dimensions(squares.url.appendingPathComponent("photo.png")) == (30, 30))
+        let pdf = try pdfFixture()
+        o = Options(); o.format = .png
+        XCTAssertTrue(dimensions(try Engine.convert(pdf, options: o, directory: directory).url) == (200, 120))
+        o.pdfDPI = 300
+        XCTAssertTrue(dimensions(try Engine.convert(pdf, options: o, directory: directory).url) == (417, 250))
+        o.pdfDPI = 72
+        XCTAssertTrue(dimensions(try Engine.convert(pdf, options: o, directory: directory).url) == (100, 60))
+    }
+    func testAnimationsRotate() throws {
+        let input = directory.appendingPathComponent("spin.gif")
+        write([image(30).cropping(to: CGRect(x: 0, y: 0, width: 30, height: 20))!, image(30).cropping(to: CGRect(x: 0, y: 0, width: 30, height: 20))!], to: input, type: .gif)
+        var o = Options(); o.format = .gif; o.rotation = 90
+        let output = try Engine.convert(input, options: o, directory: directory)
+        let source = CGImageSourceCreateWithURL(output.url as CFURL, nil)!
+        XCTAssertEqual(CGImageSourceGetCount(source), 2); XCTAssertTrue(dimensions(output.url) == (20, 30))
+    }
 }
 
 @main struct Checks {
@@ -682,7 +782,11 @@ final class EngineTests {
             ("PDF output and combining", suite.testPDFOutputAndCombining),
             ("animated PNG, WebP, HEIC and GIF output", suite.testAnimationOutputs),
             ("metadata-only for TIFF, GIF and AVIF", suite.testMetadataOnlyMoreFormats),
-            ("AVIF at 100% quality", suite.testAVIFAtFullQuality)
+            ("AVIF at 100% quality", suite.testAVIFAtFullQuality),
+            ("width, height, fill, enlarging, rotation and crop plans", suite.testGeometryModes),
+            ("rotate, flip and centred crop pixels", suite.testRotateFlipAndCrop),
+            ("fill and crop, enlarging, @1x–@3x sets and PDF resolution", suite.testFillUpscaleScaleSetsAndPDFResolution),
+            ("animations rotate frame by frame", suite.testAnimationsRotate)
         ]
         for (name, check) in checks {
             let before = failures
