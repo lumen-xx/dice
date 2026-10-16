@@ -117,6 +117,8 @@ public struct Options: Sendable, Codable {
     public var convertToSRGB = false
     /// With `stripMetadata`: remove only location (GPS coordinates and place names) and keep the rest.
     public var removeLocationOnly = false
+    /// Keep the subjects Vision finds and make the background transparent.
+    public var removeBackground = false
     public init() {}
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -151,6 +153,7 @@ public struct Options: Sendable, Codable {
         keepHDR = try c.decodeIfPresent(Bool.self, forKey: .keepHDR) ?? keepHDR
         convertToSRGB = try c.decodeIfPresent(Bool.self, forKey: .convertToSRGB) ?? convertToSRGB
         removeLocationOnly = try c.decodeIfPresent(Bool.self, forKey: .removeLocationOnly) ?? removeLocationOnly
+        removeBackground = try c.decodeIfPresent(Bool.self, forKey: .removeBackground) ?? removeBackground
     }
     /// Choices that only make sense for the images they were made for; a new session starts without them.
     public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false; rotation = 0; flipHorizontal = false; flipVertical = false; removeLocationOnly = false }
@@ -172,6 +175,7 @@ public struct Options: Sendable, Codable {
         if flipHorizontal { parts.append("Flipped ↔") }
         if flipVertical { parts.append("Flipped ↕") }
         if crop != .none { parts.append(crop.rawValue) }
+        if removeBackground { parts.append("No background") }
         return parts
     }
     public var normalizedRotation: Int { ((rotation % 360) + 360) % 360 / 90 * 90 }

@@ -848,6 +848,49 @@ final class EngineTests {
         XCTAssertNil(stripped.value("Artist")); XCTAssertFalse(stripped.hasGPS)
         var reset = Options(); reset.removeLocationOnly = true; reset.resetSessionChoices(); XCTAssertFalse(reset.removeLocationOnly)
     }
+    /// A red ball with a shadow on a pale grey table: something Vision recognises as a subject.
+    func subjectFixture(type: UTType = .png) -> URL {
+        let url = directory.appendingPathComponent("ball." + type.preferredFilenameExtension!)
+        let c = CGContext(data: nil, width: 300, height: 200, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.setFillColor(CGColor(srgbRed: 0.92, green: 0.92, blue: 0.9, alpha: 1)); c.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
+        c.setShadow(offset: CGSize(width: 6, height: -6), blur: 12, color: CGColor(gray: 0, alpha: 0.5))
+        c.setFillColor(CGColor(srgbRed: 0.85, green: 0.15, blue: 0.2, alpha: 1)); c.fillEllipse(in: CGRect(x: 100, y: 50, width: 100, height: 100))
+        c.setFillColor(CGColor(srgbRed: 0.1, green: 0.5, blue: 0.2, alpha: 1)); c.fill(CGRect(x: 146, y: 145, width: 8, height: 25))
+        write([c.makeImage()!], to: url, type: type); return url
+    }
+    func testBackgroundRemoval() throws {
+        let png = subjectFixture()
+        var o = Options(); o.removeBackground = true
+        let cut = try Engine.convert(png, options: o, directory: directory)
+        let cutout = try Engine.previewImage(cut.url, maxPixelSize: 300)
+        XCTAssertEqual(rgba(cutout, x: 5, y: 5)[3], 0); XCTAssertEqual(rgba(cutout, x: 290, y: 190)[3], 0)
+        let centre = rgba(cutout, x: 150, y: 100)
+        XCTAssertEqual(centre[3], 255); XCTAssertTrue(centre[0] > 180 && centre[1] < 80)
+        XCTAssertTrue(cut.note?.contains("Background removed") == true)
+        // "Same as original" JPEG becomes PNG to keep the transparency; an explicit JPEG is flattened instead.
+        let jpeg = subjectFixture(type: .jpeg)
+        let fromJPEG = try Engine.convert(jpeg, options: o, directory: directory)
+        XCTAssertEqual(fromJPEG.url.pathExtension, "png"); XCTAssertTrue(fromJPEG.note?.contains("Saved as PNG to keep the transparent background") == true)
+        XCTAssertEqual(rgba(try Engine.previewImage(fromJPEG.url, maxPixelSize: 300), x: 5, y: 5)[3], 0)
+        o.format = .jpeg; o.flattenColor = [0, 0, 1]
+        let flat = rgba(try Engine.previewImage(try Engine.convert(jpeg, options: o, directory: directory).url, maxPixelSize: 300), x: 5, y: 5)
+        XCTAssertTrue(flat[2] > 230 && flat[0] < 30)
+        // Shaped too: square crop then 100 px, still transparent around the ball.
+        o = Options(); o.removeBackground = true; o.crop = .square; o.resize = .edge; o.edge = 100; o.format = .webp
+        let shaped = try Engine.convert(png, options: o, directory: directory)
+        let small = try Engine.previewImage(shaped.url, maxPixelSize: 100)
+        XCTAssertEqual(small.width, 100); XCTAssertEqual(small.height, 100); XCTAssertTrue(rgba(small, x: 2, y: 2)[3] < 10); XCTAssertEqual(rgba(small, x: 50, y: 50)[3], 255)
+        // Resize-only still processes images that are already small enough.
+        o = Options(); o.removeBackground = true; o.resize = .edge; o.edge = 1000
+        XCTAssertTrue(try Engine.resize(png, options: o, directory: directory) != nil)
+        // No subject: a clear error, nothing written.
+        let flatGrey = directory.appendingPathComponent("grey.png")
+        write([image(64)], to: flatGrey, type: .png)
+        o = Options(); o.removeBackground = true
+        do { _ = try Engine.convert(flatGrey, options: o, directory: directory); XCTAssertTrue(false) }
+        catch { XCTAssertTrue(error.localizedDescription.contains("couldn't find a subject")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("grey-dice.png").path))
+    }
 }
 
 @main struct Checks {
@@ -903,7 +946,8 @@ final class EngineTests {
             ("convert to sRGB", suite.testConvertToSRGB),
             ("HDR kept with gain maps, or tone-mapped", suite.testHDRKeptOrToneMapped),
             ("metadata-only removal keeps HDR", suite.testMetadataOnlyKeepsHDR),
-            ("location-only metadata removal", suite.testLocationOnlyRemoval)
+            ("location-only metadata removal", suite.testLocationOnlyRemoval),
+            ("background removal", suite.testBackgroundRemoval)
         ]
         for (name, check) in checks {
             let before = failures

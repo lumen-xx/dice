@@ -143,7 +143,7 @@ public enum Engine {
     public static func resize(_ input: URL, options: Options, directory: URL, page: Int = 1) throws -> ConversionResult? {
         let info = try inspect(input, page: page)
         let (w, h) = displaySize(input, info: info, options: options)
-        guard !(try options.geometry(width: w, height: h, vector: DocumentImage.isDocument(input))).isIdentity(width: w, height: h) else { return nil }
+        guard try options.removeBackground || !(options.geometry(width: w, height: h, vector: DocumentImage.isDocument(input))).isIdentity(width: w, height: h) else { return nil }
         var resize = options
         resize.format = .original; resize.metadataOnly = false; resize.stripMetadata = false
         resize.quality = 1; resize.webpLossless = true; resize.keepAnimation = true
@@ -160,6 +160,10 @@ public enum Engine {
             let match = OutputFormat.matching(inputType: inputType)
             format = match.format
             if !match.exact && !document { notes.append("Saved as \(format.rawValue); Dice can't write \(UTType(inputType)?.localizedDescription ?? "this format")") }
+        }
+        // A cut-out needs transparency: "Same as original" saves JPEG and BMP inputs as PNG instead.
+        if options.removeBackground && !options.metadataOnly && options.format == .original && noAlpha.contains(format) {
+            format = .png; notes.removeAll { $0.hasPrefix("Saved as") }; notes.append("Saved as PNG to keep the transparent background")
         }
         let count = try pageCount(input)
         let suffix = inputType == UTType.pdf.identifier || (inputType == UTType.tiff.identifier && count > 1) ? "-page-\(page)" : (count > 1 ? "-frame-\(page)" : "")
@@ -192,7 +196,9 @@ public enum Engine {
         let keepHDR = hdrInput && options.keepHDR && !options.convertToSRGB && gainMapFormats.contains(format)
         if keepHDR { notes.append("HDR kept") }
         else if hdrInput && options.keepHDR { notes.append(options.convertToSRGB ? "HDR converted to SDR for sRGB" : "\(format.rawValue) can't hold HDR, so it was saved as SDR") }
-        var image = try shape(document ? try DocumentImage.render(input, page: page, edge: geometry.decodeEdge) : try previewImage(input, maxPixelSize: geometry.decodeEdge, page: page, hdr: hdrInput ? keepHDR : nil), geometry, options: options)
+        var image = document ? try DocumentImage.render(input, page: page, edge: geometry.decodeEdge) : try previewImage(input, maxPixelSize: geometry.decodeEdge, page: page, hdr: hdrInput ? keepHDR : nil)
+        if options.removeBackground { image = try removeBackground(image); notes.append("Background removed") }
+        image = try shape(image, geometry, options: options)
         var recoloured = false
         if options.convertToSRGB {
             let converted = try toSRGB(image)
@@ -232,7 +238,7 @@ public enum Engine {
             }
             if locationOnly && keepMetadata { try removeLocation(output); notes.append("Location removed; other metadata kept") }
             if keepHDR && !hasGainMap(output) { notes.removeAll { $0 == "HDR kept" }; notes.append("HDR could not be kept") }
-            let sameShape = count == 1 && format.type == inputType && !recoloured && geometry.isIdentity(width: imageInfo.width, height: imageInfo.height)
+            let sameShape = count == 1 && format.type == inputType && !recoloured && !options.removeBackground && geometry.isIdentity(width: imageInfo.width, height: imageInfo.height)
             if options.keepSmallerOriginal && !document && sameShape && fileSize(output) >= fileSize(input), let kept = try keepOriginal(input, at: output, removingMetadata: options.stripMetadata, locationOnly: locationOnly) {
                 return ConversionResult(url: output, bytes: fileSize(output), note: kept)
             }

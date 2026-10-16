@@ -342,6 +342,7 @@ struct DiceView: View {
                 Toggle("Flip horizontally", isOn: $model.options.flipHorizontal)
                 Toggle("Flip vertically", isOn: $model.options.flipVertical)
                 Picker("Crop", selection: $model.options.crop) { ForEach(CropAspect.allCases) { Text($0 == .none ? "None" : $0.rawValue + " (centred)").tag($0) } }
+                Toggle("Remove background", isOn: $model.options.removeBackground)
                 Divider()
                 Toggle("Allow enlarging", isOn: $model.options.upscale)
                 Toggle("Also save @2x and @1x", isOn: $model.options.scaleSet)
@@ -352,7 +353,7 @@ struct DiceView: View {
                 Toggle("Convert to sRGB", isOn: $model.options.convertToSRGB)
                 if batchHasHDR { Toggle("Keep HDR", isOn: $model.options.keepHDR) }
             } label: { Text(shapeLabel).lineLimit(1) }
-                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Rotate, flip, crop, enlarge, save @1x–@3x sets, or convert colours")
+                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Rotate, flip, crop, remove the background, enlarge, save @1x–@3x sets, or convert colours")
             if model.options.scaleSet { InfoTip("The result is the @3x image; @2x and @1x are saved beside it in one folder.") }
             Spacer(minLength: 0)
         }

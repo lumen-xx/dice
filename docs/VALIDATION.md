@@ -1,3 +1,13 @@
+# v0.2.5 background removal — 2026-10-16
+
+All 51 standalone checks pass, one of them new. On a synthetic red ball with a shadow on a pale table, Remove background (Vision's foreground instance mask, on device) leaves the corners fully transparent and the ball's centre opaque red; a JPEG with "Same as original" is saved as PNG to keep the transparency, while an explicit JPEG is flattened onto the fill colour; a 1:1 crop resized to 100 px as WebP stays transparent around the ball; Resize only still processes an image already within the size; a plain grey image fails with "couldn't find a subject" and writes nothing. Each part was confirmed to fail with its code reverted (mask not applied, JPEG kept as JPEG, resize-only skipping).
+
+The mask is applied to the decoded pixels in their own colour space (or half-float for HDR), so colours aren't re-rendered. "Keep the original when it's smaller" never applies to a cut-out. Animations are not cut out.
+
+Native review of Dice Dev with Remove background on, using the macOS user picture Parrot.heic (512 × 512): Start saved `parrot-dice.heic` with alpha, 36% fully transparent and 61% fully opaque, and composited over a checkerboard the parrot's head and beak are cleanly cut out. The Adjust menu shows Remove background under Crop and the row reads "No background" when it's on. Not checked: photos with several subjects, and very large images (Vision runs at the decode size, up to the output size).
+
+---
+
 # v0.2.4 colour and metadata — 2026-10-16
 
 All 50 standalone checks pass, five of them new. File names: `{name}-dice` by default; `{n}` pads to the batch size (`003` of 120, at least two digits), `{date}` is today as `yyyy-MM-dd`; slashes and colons are dropped, an empty pattern falls back to the original name, a leading dot is not allowed to hide the file, and PDF pages keep their page suffix. Convert to sRGB turns a Display P3 image into sRGB with P3's pure green clipped to sRGB green, and leaves an sRGB image unchanged with no note. HDR, on synthetic ISO gain-map photos (half SDR grey, half four times SDR white): an HDR JPEG with Artist, GPS and City saved as HEIC keeps its gain map and its metadata; with Remove location it keeps the gain map and Artist and loses GPS and City; rotated and resized to 16 × 32 it stays HDR as JPEG, HEIC and AVIF; as PNG it is SDR with a note; with Keep HDR off, or Convert to sRGB on, it is SDR. Metadata-only removal keeps the gain map of HDR JPEG, HEIC and AVIF files. Location-only removal clears EXIF and XMP GPS and IPTC/XMP place names while keeping Artist, both in place and when converting. The JPEG HDR removal, HDR decoding, location removal and sRGB checks were confirmed to fail with their change reverted.
