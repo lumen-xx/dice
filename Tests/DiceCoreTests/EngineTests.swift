@@ -3,6 +3,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import CoreGraphics
 import PDFKit
+import CoreText
 import DiceCore
 
 
@@ -923,6 +924,16 @@ final class EngineTests {
         let fitted = try Engine.convert(photo, options: sized, directory: directory)
         XCTAssertTrue(fitted.bytes <= 20_000); XCTAssertTrue(fitted.note?.contains("Fits 20 KB") == true)
     }
+    func testRecognizedTextForSearch() throws {
+        let c = CGContext(data: nil, width: 600, height: 160, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.setFillColor(CGColor(gray: 1, alpha: 1)); c.fill(CGRect(x: 0, y: 0, width: 600, height: 160))
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 72, nil)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "Lantern 42", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)]))
+        c.textPosition = CGPoint(x: 30, y: 50); CTLineDraw(line, c)
+        let text = ImageSearch.recognizedText(in: c.makeImage()!)
+        XCTAssertTrue(text.contains("Lantern")); XCTAssertTrue(ImageSearch.matches("lantern 42", text: ImageSearch.text(filename: "a.png", path: "/tmp", info: nil, recognizedText: text)))
+        XCTAssertEqual(ImageSearch.recognizedText(in: image(32)), "")
+    }
 }
 
 @main struct Checks {
@@ -980,7 +991,8 @@ final class EngineTests {
             ("metadata-only removal keeps HDR", suite.testMetadataOnlyKeepsHDR),
             ("location-only metadata removal", suite.testLocationOnlyRemoval),
             ("background removal", suite.testBackgroundRemoval),
-            ("JPEG XL output, lossless, metadata and target size", suite.testJPEGXL)
+            ("JPEG XL output, lossless, metadata and target size", suite.testJPEGXL),
+            ("text in images for search", suite.testRecognizedTextForSearch)
         ]
         for (name, check) in checks {
             let before = failures

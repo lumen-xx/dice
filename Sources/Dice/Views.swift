@@ -12,6 +12,7 @@ struct DiceView: View {
     @State private var imageSettingsPresented = false
     @State private var exportPopoverPresented = false
     @State private var finderMenu = FinderMenu.isEnabled
+    @AppStorage("adjustExpanded") private var adjustExpanded = false
     // `--show metadata` or `--show batch` opens that pane, for screenshots; normal launches start on the image.
     @State private var metadata = DiceView.launchPane == "metadata"
     @State private var batch = DiceView.launchPane == "batch"
@@ -45,7 +46,7 @@ struct DiceView: View {
                     .padding(.top, 64).padding(.bottom, model.items.isEmpty ? 16 : 58)
             } else if model.items.isEmpty {
                 VStack(spacing: 12) {
-                    Image(systemName: "die.face.5").font(DiceStyle.emptySymbol).foregroundStyle(DiceStyle.auroraMark)
+                    Image(systemName: "die.face.5").font(DiceStyle.emptySymbol).foregroundStyle(.secondary)
                     Button("Choose images…") { model.chooseFiles() }.buttonStyle(.plain).font(DiceStyle.body).foregroundStyle(.secondary)
                     Text("or drop them here").font(DiceStyle.caption).foregroundStyle(.tertiary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -234,8 +235,8 @@ struct DiceView: View {
             if model.preferences.defaultResize == .edge { HStack { Text("Longest edge"); number($model.preferences.defaultEdge); Text("px") } }
             if model.preferences.defaultResize == .percent { HStack { Text("Scale"); number($model.preferences.defaultPercent); Text("%") } }
             HStack { Text("Default quality"); Slider(value: $model.preferences.defaultQuality, in: 0.1...1); Text("\(Int(model.preferences.defaultQuality * 100))%").monospacedDigit() }
-            Toggle("Remove personal metadata by default", isOn: $model.preferences.defaultStripMetadata).disabled(model.preferences.alwaysStripMetadata)
-            HStack(spacing: 6) { Toggle("Always remove personal metadata", isOn: $model.preferences.alwaysStripMetadata); InfoTip("Removes metadata from every export and hides the option in image settings"); Spacer(minLength: 0) }
+            Toggle("Remove metadata by default", isOn: $model.preferences.defaultStripMetadata).disabled(model.preferences.alwaysStripMetadata)
+            HStack(spacing: 6) { Toggle("Always remove metadata", isOn: $model.preferences.alwaysStripMetadata); InfoTip("Removes all metadata (except the colour profile) from every export and hides the option in image settings"); Spacer(minLength: 0) }
             HStack(spacing: 6) { Toggle("Replace originals by default", isOn: $model.preferences.defaultReplaceOriginals); InfoTip("Original goes to the Trash; PDFs, SVGs and multi-frame files are always saved as copies"); Spacer(minLength: 0) }
             Text("Defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)
@@ -297,7 +298,7 @@ struct DiceView: View {
                 if model.options.resize == .fit || model.options.resize == .fill { HStack { number($model.options.width, label: "Width"); Text("×"); number($model.options.height, label: "Height"); Text("px") } }
                 if model.options.resize == .width { HStack { Text("Width"); number($model.options.width, label: "Width"); Text("px") } }
                 if model.options.resize == .height { HStack { Text("Height"); number($model.options.height, label: "Height"); Text("px") } }
-                shapeRow
+                adjustSection
                 if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
                 if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { compressionRow }
                 if writesPNG { HStack(spacing: 6) { Toggle("Optimise PNG", isOn: $model.options.optimizePNG); InfoTip("Recompresses PNG files losslessly with oxipng: smaller files, identical pixels."); Spacer(minLength: 0) } }
@@ -305,9 +306,13 @@ struct DiceView: View {
                 if model.options.format == .pdf && model.items.count > 1 { HStack(spacing: 6) { Toggle("Combine into one PDF", isOn: $model.options.combinePDF); InfoTip("Every image becomes a page, in batch order, in a single PDF saved beside the first image."); Spacer(minLength: 0) } }
             }
             if !model.preferences.alwaysStripMetadata {
-                Picker("Metadata", selection: metadataChoice) {
-                    Text("Keep").tag(0).disabled(model.options.metadataOnly); Text("Remove location").tag(1); Text("Remove personal").tag(2)
-                }.tint(.primary)
+                HStack(spacing: 6) {
+                    Picker("Metadata", selection: metadataChoice) {
+                        Text("Keep").tag(0).disabled(model.options.metadataOnly); Text("Remove location").tag(1); Text("Remove all").tag(2)
+                    }.tint(.primary).fixedSize()
+                    InfoTip("Remove all strips camera details, GPS, dates, captions and maker notes. Only the colour profile stays, so colours still display correctly. Remove location takes out GPS and place names and keeps the rest.")
+                    Spacer(minLength: 0)
+                }
             }
             Divider()
             HStack(spacing: 6) { Toggle("Replace originals", isOn: $model.options.replaceOriginals); InfoTip("Move each original to the Trash and save the result under its name. PDFs, SVGs and multi-frame files are always saved as copies."); Spacer(minLength: 0) }
@@ -327,36 +332,61 @@ struct DiceView: View {
             } else { Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() }
         }
     }
-    /// Keep, location only (GPS and place names), or all personal metadata.
+    /// Keep, location only (GPS and place names), or all metadata except the colour profile.
     var metadataChoice: Binding<Int> {
         Binding(get: { !model.options.stripMetadata ? 0 : model.options.removeLocationOnly ? 1 : 2 },
                 set: { model.options.stripMetadata = $0 != 0; model.options.removeLocationOnly = $0 == 1 })
     }
     var batchHasHDR: Bool { model.items.contains { $0.info?.isHDR == true } }
-    /// Rotation, flips, crop, enlarging, scale sets, PDF resolution and colour behind one menu, so the popover keeps its size.
-    var shapeRow: some View {
-        HStack(spacing: 6) {
-            Text("Adjust")
-            Menu {
-                Picker("Rotate", selection: $model.options.rotation) { Text("None").tag(0); Text("90° clockwise").tag(90); Text("180°").tag(180); Text("90° anticlockwise").tag(270) }
-                Toggle("Flip horizontally", isOn: $model.options.flipHorizontal)
-                Toggle("Flip vertically", isOn: $model.options.flipVertical)
-                Picker("Crop", selection: $model.options.crop) { ForEach(CropAspect.allCases) { Text($0 == .none ? "None" : $0.rawValue + " (centred)").tag($0) } }
-                Toggle("Remove background", isOn: $model.options.removeBackground)
-                Divider()
-                Toggle("Allow enlarging", isOn: $model.options.upscale)
-                Toggle("Also save @2x and @1x", isOn: $model.options.scaleSet)
-                if model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) {
-                    Picker("PDF resolution", selection: $model.options.pdfDPI) { ForEach([72, 144, 300, 600], id: \.self) { Text("\($0) dpi").tag($0) } }
-                }
-                Divider()
-                Toggle("Convert to sRGB", isOn: $model.options.convertToSRGB)
-                if batchHasHDR { Toggle("Keep HDR", isOn: $model.options.keepHDR) }
-            } label: { Text(shapeLabel).lineLimit(1) }
-                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Rotate, flip, crop, remove the background, enlarge, save @1x–@3x sets, or convert colours")
-            if model.options.scaleSet { InfoTip("The result is the @3x image; @2x and @1x are saved beside it in one folder.") }
-            Spacer(minLength: 0)
+    /// Rotation, flips, crop, background, enlarging, scale sets, PDF resolution and colour, inline. Folded, it is one
+    /// row with a summary, so the popover stays short; whether it is open is remembered.
+    var adjustSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { adjustExpanded.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(adjustExpanded ? 90 : 0))
+                    Text("Adjust")
+                    Spacer(minLength: 8)
+                    if !adjustExpanded { Text(shapeLabel).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("Adjust").accessibilityValue(adjustExpanded ? "Expanded" : shapeLabel)
+                .help("Rotate, flip, crop, remove the background, enlarge, save @1x–@3x sets, or convert colours")
+            if adjustExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Text("Rotate")
+                        adjustButton("rotate.left", "Rotate anticlockwise") { model.options.rotation = (model.options.normalizedRotation + 270) % 360 }
+                        adjustButton("rotate.right", "Rotate clockwise") { model.options.rotation = (model.options.normalizedRotation + 90) % 360 }
+                        Text("\(model.options.normalizedRotation)°").monospacedDigit().foregroundStyle(.secondary).frame(width: 34, alignment: .leading)
+                        Text("Flip").padding(.leading, 10)
+                        adjustButton("arrow.left.and.right.righttriangle.left.righttriangle.right", "Flip horizontally", on: model.options.flipHorizontal) { model.options.flipHorizontal.toggle() }
+                        adjustButton("arrow.up.and.down.righttriangle.up.righttriangle.down", "Flip vertically", on: model.options.flipVertical) { model.options.flipVertical.toggle() }
+                    }
+                    Picker("Crop", selection: $model.options.crop) { ForEach(CropAspect.allCases) { Text($0 == .none ? "None" : $0.rawValue + " (centred)").tag($0) } }.tint(.primary).fixedSize()
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                        GridRow { Toggle("Remove background", isOn: $model.options.removeBackground); Toggle("Allow enlarging", isOn: $model.options.upscale) }
+                        GridRow {
+                            HStack(spacing: 6) { Toggle("Save @2x and @1x", isOn: $model.options.scaleSet); InfoTip("The result is the @3x image; @2x and @1x are saved beside it in one folder.") }
+                            Toggle("Convert to sRGB", isOn: $model.options.convertToSRGB)
+                        }
+                        if batchHasHDR { GridRow { Toggle("Keep HDR", isOn: $model.options.keepHDR) } }
+                    }
+                    if model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) {
+                        Picker("PDF resolution", selection: $model.options.pdfDPI) { ForEach([72, 144, 300, 600], id: \.self) { Text("\($0) dpi").tag($0) } }.tint(.primary).fixedSize()
+                    }
+                }.padding(.leading, 16).transition(.opacity)
+            }
         }
+    }
+    /// A small square button for the Adjust row; `on` fills it with the accent for flips that are applied.
+    func adjustButton(_ symbol: String, _ label: String, on: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).frame(width: 26, height: 22)
+                .foregroundStyle(on ? accent : .primary)
+                .background(RoundedRectangle(cornerRadius: 6).fill(on ? accent.opacity(0.22) : Color.primary.opacity(0.08)))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).help(label).accessibilityLabel(label).accessibilityAddTraits(on ? .isSelected : [])
     }
     var shapeLabel: String {
         var parts = model.options.shapeSummary

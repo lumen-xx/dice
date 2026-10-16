@@ -1,3 +1,15 @@
+# v0.2.7 drop fix and inline Adjust — 2026-10-16
+
+All 53 standalone checks pass, one of them new: text drawn into an image ("Lantern 42") is recognised and found by a search for "lantern 42", and a blank image yields no text.
+
+Dropping an image could sit on the spinner for 16–32 seconds. Import ran on-device text recognition (for search) before showing the image, and Vision's first request with automatic language detection takes that long to load its models. Profiling the reported SVG gave page count 0.01 s, inspect 0.08 s, preview 0.02 s and recognition 32.4 s cold, then 0.14 s warm. Recognition now runs in a background pass after import, one image at a time, and search picks up the text when it's ready. Native check on the same SVG with a freshly built Dice Dev: the info line appears after 0.3 s (before: 16 s).
+
+The empty-state die is monochrome (secondary label colour); the aurora gradient is kept for the drop glow, the progress ring and the app icon. The Metadata choice "Remove personal" is now "Remove all", with a tip saying only the colour profile stays.
+
+The Adjust menu is now an inline section of Image settings. Folded, it is one row with a summary ("No background, @1–3x"); unfolded, it shows rotate buttons with the angle, flip buttons that fill with the accent when on, a Crop picker, and switches for Remove background, Allow enlarging, Save @2x and @1x, Convert to sRGB, and Keep HDR or PDF resolution when the batch needs them. Whether it is open is remembered. Native review of Dice Dev captured both states. The rotate.left symbol was rendered to confirm it points anticlockwise. Not checked natively: pressing the buttons inside the popover, because System Events can't reach the popover's controls; the options they set are the same ones the menu set.
+
+---
+
 # v0.2.6 JPEG XL — 2026-10-16
 
 All 52 standalone checks pass, one of them new. JPEG XL output through the bundled cjxl 0.12.0: a 200 × 150 PNG becomes a 200 × 150 file that ImageIO reads as `public.jpeg-xl`, with kept XMP Creator; quality 30% is smaller than 90%; Lossless (`-d 0`) decodes to identical pixels for an opaque photo and a half-transparent image; "Same as original" keeps a JPEG XL as JPEG XL with no note (before, it became JPEG); metadata-only removal works on it; a 20 KB target size is met. The lossless and metadata-only checks were confirmed to fail with their change reverted. The same-as-original fallback check now expects JPEG XL.

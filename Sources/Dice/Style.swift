@@ -18,7 +18,6 @@ enum DiceStyle {
     static let nsAurora: [NSColor] = [mintRGB, cyanRGB, indigoRGB, violetRGB].map(nsColor)
     /// Closed loop for rings and the drop glow.
     static func auroraLoop(angle: Double = 0) -> AngularGradient { AngularGradient(colors: aurora + [mint], center: .center, angle: .degrees(angle)) }
-    static let auroraMark = LinearGradient(colors: aurora, startPoint: .topLeading, endPoint: .bottomTrailing)
 
     static let title = Font.system(size: 16, weight: .semibold)
     static let heading = Font.system(size: 14, weight: .semibold)

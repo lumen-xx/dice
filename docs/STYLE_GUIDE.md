@@ -22,7 +22,7 @@ Avoid one-off font sizes in new UI. Text follows system light/dark appearance an
 
 ## Colour and material
 
-Dice's colour is **Aurora**, the light that runs around the window when a file is dragged over it. It's one palette for the whole app: the drop glow, the Start button, progress, the empty-state mark, the app icon and the menu bar drop target all use the same four colours. There is no other brand colour.
+Dice's colour is **Aurora**, the light that runs around the window when a file is dragged over it. It's one palette for the whole app: the drop glow, the Start button, progress, the app icon and the menu bar drop target all use the same four colours. There is no other brand colour.
 
 | Token | Hex (sRGB) | Role |
 |---|---|---|
@@ -36,7 +36,7 @@ The values live in `Sources/Dice/Style.swift` (`DiceStyle`), with SwiftUI and Ap
 How to use them:
 
 - **One solid accent.** Indigo is the only flat brand colour. The Start play glyph, toggles, sliders, pickers, the selected batch row (14% indigo) and the export menu's icons use it. Dark appearance uses the lighter `#8C96FF`, so the accent stays readable on translucent popovers over dark or busy images. Pickers and pop-up menus show their value in the primary text colour, never the accent.
-- **Gradients are for brand moments only**: the drop glow and progress ring (the closed loop mint → cyan → indigo → violet → mint), the empty-state die (mint → violet, diagonal) and the app icon. Never put a gradient on text, on secondary controls or across large backgrounds.
+- **Gradients are for brand moments only**: the drop glow and progress ring (the closed loop mint → cyan → indigo → violet → mint), and the app icon. The empty-state die is monochrome (secondary label colour), so the empty window stays quiet until something is dragged over it. Never put a gradient on text, on secondary controls or across large backgrounds.
 - **Start** is the plain play glyph in the toolbar, in indigo, with the standard 30 pt target. Disabled, it uses the native disabled appearance.
 - **Motion.** The glow turns only while an accepted file hovers over the window. The progress ring moves only when an image finishes. Nothing is animated while idle, and Reduce Motion stops both.
 - Primary and secondary system text colours carry content and supporting details. Errors use the system red; disabled controls use the native disabled appearance.

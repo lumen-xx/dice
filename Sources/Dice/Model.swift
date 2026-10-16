@@ -107,11 +107,6 @@ struct ImageItem: Identifiable {
                     if let image = try? Engine.previewImage(url, maxPixelSize: 1600, page: page) {
                         cache.insert(image, for: PreviewCache.key(url, page: page))
                         if let thumbnail = try? Engine.scaledPreview(image, maxPixelSize: 96) { item.thumbnail = NSImage(cgImage: thumbnail, size: .zero) }
-                        let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate
-                        request.usesLanguageCorrection = true; request.automaticallyDetectsLanguage = true
-                        if (try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])) != nil {
-                            item.recognizedText = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-                        }
                     }
                     item.rebuildSearch()
                     return item
@@ -122,6 +117,7 @@ struct ImageItem: Identifiable {
                 if selected == nil { selected = loaded.first?.id }
             }
             importing = false
+            recognizeText(in: items.filter { $0.info != nil && $0.recognizedText.isEmpty })
             if closeRequested { clear(); return }
             status = "\(items.count) image\(items.count == 1 ? "" : "s") ready"
             if startWhenReady { startWhenReady = false; if !items.isEmpty { process() } }
@@ -144,8 +140,28 @@ struct ImageItem: Identifiable {
             status = "Moved \(item.url.lastPathComponent) to the Trash"
         } catch { alert = error.localizedDescription }
     }
+    private var textTask: Task<Void, Never>?
+    /// Fills in each image's text for search after import, one image at a time, so the batch is ready at once.
+    func recognizeText(in pending: [ImageItem]) {
+        let jobs = pending.map { ($0.id, $0.url, $0.page) }, cache = previewCache, previous = textTask
+        textTask = Task { [weak self] in
+            await previous?.value
+            for (id, url, page) in jobs {
+                if Task.isCancelled { return }
+                let text = await Task.detached(priority: .utility) { () -> String? in
+                    autoreleasepool {
+                        guard let image = cache.image(for: PreviewCache.key(url, page: page)) ?? (try? Engine.previewImage(url, maxPixelSize: 1600, page: page)) else { return nil }
+                        return ImageSearch.recognizedText(in: image)
+                    }
+                }.value
+                guard let self, !Task.isCancelled, let text, let index = self.items.firstIndex(where: { $0.id == id }) else { continue }
+                self.items[index].recognizedText = text; self.items[index].rebuildSearch()
+            }
+        }
+    }
     func clear() {
         guard !busy, !importing else { return }
+        textTask?.cancel(); textTask = nil
         for item in items { if let result = item.result { try? FileManager.default.removeItem(at: result.url) } }
         previewCache.clear()
         if let old = combined { try? FileManager.default.removeItem(at: old.url); combined = nil }
