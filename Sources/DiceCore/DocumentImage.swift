@@ -4,8 +4,51 @@ import ImageIO
 import UniformTypeIdentifiers
 
 /// Vector inputs share the image pipeline after on-demand rasterization.
-enum DocumentImage {
-    static func isDocument(_ url: URL) -> Bool { ["pdf", "svg"].contains(url.pathExtension.lowercased()) }
+public enum DocumentImage {
+    public enum Kind { case pdf, svg }
+    /// PDF, Illustrator files saved with PDF compatibility (they begin with `%PDF`), SVG and gzip-compressed SVGZ.
+    public static func kind(_ url: URL) -> Kind? {
+        switch url.pathExtension.lowercased() {
+        case "pdf": return .pdf
+        case "svg", "svgz": return .svg
+        case "ai": return hasPDFHeader(url) ? .pdf : nil
+        default: return nil
+        }
+    }
+    public static func isDocument(_ url: URL) -> Bool { kind(url) != nil }
+    static func isPDF(_ url: URL) -> Bool { kind(url) == .pdf }
+    static func hasPDFHeader(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        return (try? handle.read(upToCount: 1024)).map { String(decoding: $0, as: UTF8.self).contains("%PDF") } ?? false
+    }
+    /// Why a document-like file can't be opened, for formats macOS can't render.
+    static func unsupportedReason(_ url: URL) -> String? {
+        switch url.pathExtension.lowercased() {
+        case "ai": return "This Illustrator file was saved without PDF compatibility. Re-save it with “Create PDF Compatible File” turned on."
+        case "eps", "ps": return "macOS no longer renders PostScript, so Dice can't open EPS files. Save it as PDF or SVG first."
+        default: return nil
+        }
+    }
+    /// SVG source, decompressing SVGZ. Limited to 20 MB either way.
+    static func svgData(_ url: URL) throws -> Data {
+        guard Engine.fileSize(url) <= 20_000_000, let raw = try? Data(contentsOf: url) else { throw DiceError.message("This SVG could not be read or exceeds 20 MB.") }
+        guard raw.starts(with: [0x1f, 0x8b]) else { return raw }
+        guard let data = gunzip(raw), data.count <= 20_000_000 else { throw DiceError.message("This SVGZ could not be decompressed or exceeds 20 MB.") }
+        return data
+    }
+    /// Minimal gzip reader: skips the header (RFC 1952) and inflates the raw DEFLATE stream.
+    static func gunzip(_ data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        guard bytes.count > 18, bytes[0] == 0x1f, bytes[1] == 0x8b, bytes[2] == 8 else { return nil }
+        let flags = bytes[3]; var i = 10
+        if flags & 4 != 0 { guard i + 2 <= bytes.count else { return nil }; i += 2 + Int(bytes[i]) + Int(bytes[i + 1]) << 8 }
+        if flags & 8 != 0 { while i < bytes.count && bytes[i] != 0 { i += 1 }; i += 1 }
+        if flags & 16 != 0 { while i < bytes.count && bytes[i] != 0 { i += 1 }; i += 1 }
+        if flags & 2 != 0 { i += 2 }
+        guard i < bytes.count - 8 else { return nil }
+        return try? (Data(bytes[i..<(bytes.count - 8)]) as NSData).decompressed(using: .zlib) as Data
+    }
     static func pdf(_ url: URL) throws -> CGPDFDocument {
         guard let document = CGPDFDocument(url as CFURL) else { throw DiceError.message("This PDF could not be read.") }
         guard !document.isEncrypted || document.isUnlocked else { throw DiceError.message("Unlock this PDF before opening it in Dice.") }
@@ -13,7 +56,7 @@ enum DocumentImage {
         return document
     }
     static func dimensions(_ url: URL, page: Int) throws -> (Int, Int, Int) {
-        if url.pathExtension.lowercased() == "pdf" {
+        if isPDF(url) {
             let document = try pdf(url)
             guard let selected = document.page(at: page) else { throw DiceError.message("This PDF page does not exist.") }
             let box = selected.getBoxRect(.cropBox)
@@ -40,7 +83,7 @@ enum DocumentImage {
         let width = max(1, Int((Double(w) * scale).rounded()))
         let height = max(1, Int((Double(h) * scale).rounded()))
         guard width * height <= 80_000_000 else { throw DiceError.message("Choose a smaller output size; this document exceeds 80 megapixels.") }
-        if url.pathExtension.lowercased() == "pdf" {
+        if isPDF(url) {
             let document = try pdf(url)
             guard let selected = document.page(at: page), let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not render this PDF page.") }
             let rect = CGRect(x: 0, y: 0, width: width, height: height)
@@ -67,7 +110,7 @@ private final class SVGHeader: NSObject, XMLParserDelegate {
     var attributes: [String: String]?
     init(url: URL) throws {
         super.init()
-        guard Engine.fileSize(url) <= 20_000_000, let parser = XMLParser(contentsOf: url) else { throw DiceError.message("This SVG could not be read or exceeds 20 MB.") }
+        let parser = XMLParser(data: try DocumentImage.svgData(url))
         parser.shouldResolveExternalEntities = false
         parser.delegate = self
         _ = parser.parse()

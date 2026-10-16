@@ -42,6 +42,9 @@ def prepare_tools(destination):
     for pod in lib.rglob('*.pod'): pod.unlink()
     binary = destination / 'cwebp'
     shutil.copy2(webpprefix / 'bin/cwebp', binary)
+    # img2webp writes animated WebP; it shares cwebp's bundled libraries.
+    animator = destination / 'img2webp'
+    shutil.copy2(webpprefix / 'bin/img2webp', animator)
     dylibs = destination / 'lib'; dylibs.mkdir(exist_ok=True)
     seen = set()
     def bundle(binary_path):
@@ -58,10 +61,11 @@ def prepare_tools(destination):
                 seen.add(name); shutil.copy2(original.resolve(), target); target.chmod(0o755)
                 run('install_name_tool', '-id', '@rpath/' + name, str(target))
                 bundle(target)
-            replacement = ('@loader_path/lib/' if binary_path == binary else '@loader_path/') + name
+            replacement = ('@loader_path/lib/' if binary_path in (binary, animator) else '@loader_path/') + name
             run('install_name_tool', '-change', dep, replacement, str(binary_path))
     binary.chmod(0o755); bundle(binary)
-    for file in list(dylibs.glob('*.dylib')) + [binary]: run('codesign', '--force', '--sign', '-', str(file))
+    animator.chmod(0o755); bundle(animator)
+    for file in list(dylibs.glob('*.dylib')) + [binary, animator]: run('codesign', '--force', '--sign', '-', str(file))
     shutil.copytree(ROOT / 'vendor/licenses', destination / 'Licenses', dirs_exist_ok=True)
     (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\noxipng 10.2.1\n' + call(str(binary), '-version') + '\n')
 

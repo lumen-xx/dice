@@ -10,7 +10,7 @@ struct ImageItem: Identifiable {
     var url: URL
     var page = 1
     var name: String {
-        if url.pathExtension.lowercased() == "pdf" { return "\(url.lastPathComponent) · Page \(page)" }
+        if DocumentImage.kind(url) == .pdf { return "\(url.lastPathComponent) · Page \(page)" }
         if (info?.frames ?? 1) > 1 { return info?.type == UTType.tiff.identifier ? "\(url.lastPathComponent) · Page \(page)" : "\(url.lastPathComponent) · \(info?.frames ?? 1) frames" }
         return url.lastPathComponent
     }
@@ -37,6 +37,8 @@ struct ImageItem: Identifiable {
     @Published var status = "All processing stays on this Mac"
     @Published var alert: String?
     @Published var completed = 0
+    /// The single PDF made from the batch when Combine into one PDF is on.
+    var combined: ConversionResult?
     /// Called when a run finishes with every image processed and saved.
     var onFinished: (() -> Void)?
     /// Set by a menu bar drop: run with the current settings as soon as the dropped images are read.
@@ -146,6 +148,7 @@ struct ImageItem: Identifiable {
         guard !busy, !importing else { return }
         for item in items { if let result = item.result { try? FileManager.default.removeItem(at: result.url) } }
         previewCache.clear()
+        if let old = combined { try? FileManager.default.removeItem(at: old.url); combined = nil }
         items = []; selected = nil; status = "All processing stays on this Mac"
     }
     func chooseExportFolder() {
@@ -176,6 +179,9 @@ struct ImageItem: Identifiable {
         let suffix = preferences.fileSuffix.filter { !"/:\\".contains($0) }
         snapshot.fileSuffix = suffix
         let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly && !preferences.alwaysStripMetadata
+        // Each image becomes a PDF page in the session; only the combined document is saved.
+        let combine = snapshot.combinePDF && snapshot.format == .pdf && !snapshot.metadataOnly && !resizeOnly && items.count > 1
+        if let old = combined { try? FileManager.default.removeItem(at: old.url); combined = nil }
         busy = true; cancelRequested = false; completed = 0
         for i in items.indices {
             if let result = items[i].result { previewCache.remove(items[i].previewCacheKey); try? FileManager.default.removeItem(at: result.url) }
@@ -199,8 +205,8 @@ struct ImageItem: Identifiable {
                     let pasted = input.deletingLastPathComponent().standardizedFileURL == session.standardizedFileURL
                     let directory = exportDirectory ?? (pasted ? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first : nil)
                     // PDFs, SVGs and multi-frame files produce one output per page, so they are never replaced in place.
-                    let replace = snapshot.replaceOriginals && !pasted && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1 && !skipSave
-                    let saved: Result<URL, Error>? = skipSave ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: directory) } }.value
+                    let replace = snapshot.replaceOriginals && !pasted && !DocumentImage.isDocument(input) && (items[index].info?.frames ?? 1) == 1 && !skipSave && !combine
+                    let saved: Result<URL, Error>? = skipSave || combine ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: directory) } }.value
                     var replacedHere = false
                     switch saved {
                     case nil: break
@@ -217,13 +223,14 @@ struct ImageItem: Identifiable {
                 items[index].rebuildSearch()
                 completed += 1
             }
+            if combine && !cancelRequested && !closeRequested { await combineResults(saving: !skipSave, beside: items.first?.url, directory: exportDirectory) }
             var copied = 0
             if clipboard && !cancelRequested && !closeRequested { copied = copyResultsToClipboard() }
             var opened = 0
             if edit && !cancelRequested && !closeRequested { opened = openResultsInEditor() }
             busy = false
             if closeRequested { clear(); return }
-            status = edit && opened > 0 ? "Opened \(opened) image\(opened == 1 ? "" : "s") for editing" : clipboard && copied > 0 ? "Copied \(copied) image\(copied == 1 ? "" : "s") to the clipboard" : cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
+            status = combined != nil && !clipboard && !edit ? "Combined \(results.count) images into one PDF" : edit && opened > 0 ? "Opened \(opened) image\(opened == 1 ? "" : "s") for editing" : clipboard && copied > 0 ? "Copied \(copied) image\(copied == 1 ? "" : "s") to the clipboard" : cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
             else if !cancelRequested && results.isEmpty { alert = resizeOnly ? "Every image is already within the target size, so nothing was saved." : "No images were processed." }
             else if !cancelRequested { onFinished?() }
@@ -231,8 +238,24 @@ struct ImageItem: Identifiable {
     }
     /// Puts the processed images on the clipboard: image data for one still image, file URLs otherwise.
     /// Files are copied out of the session folder first so a paste still works after Dice closes.
+    /// Joins every PDF result, in batch order, into one document, and saves it like a single result.
+    func combineResults(saving: Bool, beside input: URL?, directory: URL?) async {
+        let pages: [URL] = results.compactMap { $0.result }.flatMap { result -> [URL] in
+            guard result.isFolder else { return [result.url] }
+            return ((try? FileManager.default.contentsOfDirectory(at: result.url, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        }
+        let output = Engine.uniqueURL(in: session, stem: "Combined" + preferences.fileSuffix.filter { !"/:\\".contains($0) }, ext: "pdf")
+        do {
+            try await Task.detached(priority: .userInitiated) { try Engine.combinePDFs(pages, to: output) }.value
+            let result = ConversionResult(url: output, bytes: Engine.fileSize(output), note: "\(pages.count) pages")
+            combined = result
+            guard saving, let input else { return }
+            let saved = try Engine.saveCopy(result, beside: input, directory: directory)
+            for i in items.indices where items[i].result != nil { items[i].savedURL = saved }
+        } catch { alert = "Could not combine the PDF: " + error.localizedDescription }
+    }
     func stagedResults() throws -> (urls: [URL], outputs: [ConversionResult]) {
-        let outputs = results.compactMap { $0.result }
+        let outputs = combined.map { [$0] } ?? results.compactMap { $0.result }
         guard !outputs.isEmpty else { return ([], []) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("com.opyuii.dice-clipboard/" + UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

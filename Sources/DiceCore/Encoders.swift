@@ -23,12 +23,16 @@ extension Engine {
     /// Writes one still image in `format`; WebP goes through a temporary PNG and cwebp.
     /// The temporary PNG gets its own name, so it can never replace another result beside `output`.
     static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL) throws {
+        if format.isIcon { return try encodeIcon(image, format: format, to: output) }
+        if format == .pdf { return try encodePDFPage(image, quality: options.quality, to: output) }
         let destination = format == .webp ? FileManager.default.temporaryDirectory.appendingPathComponent("dice-webp-" + UUID().uuidString + ".png") : output
         defer { if format == .webp { try? FileManager.default.removeItem(at: destination) } }
         let type = format == .webp ? UTType.png.identifier : format.type
         guard (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(type) == true,
               let dest = CGImageDestinationCreateWithURL(destination as CFURL, type as CFString, 1, nil) else { throw DiceError.message("This Mac cannot encode the selected format.") }
-        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: min(1,max(0,options.quality)), kCGImagePropertyOrientation: 1] as CFDictionary)
+        // The AVIF encoder fails outright at quality 1.0, so its top setting is 0.99 (visually the same).
+        let ceiling = format == .avif ? 0.99 : 1
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: min(ceiling, max(0, options.quality)), kCGImagePropertyOrientation: 1] as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the converted image.") }
         if format == .png && options.optimizePNG { try optimizePNG(output) }
         if format == .webp {
@@ -52,24 +56,98 @@ extension Engine {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw DiceError.message("Could not read frame \(index + 1).") }
         return image
     }
-    /// Animated GIF → animated GIF when `keepAnimation`; otherwise a folder of numbered frames, or just the first frame.
+    /// Pads to a square on transparency, centred, so icons never stretch.
+    static func squared(_ image: CGImage) throws -> CGImage {
+        guard image.width != image.height else { return image }
+        let side = max(image.width, image.height)
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not prepare the icon.") }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: (side - image.width) / 2, y: (side - image.height) / 2, width: image.width, height: image.height))
+        guard let square = ctx.makeImage() else { throw DiceError.message("Could not prepare the icon.") }
+        return square
+    }
+    /// One file holding every standard size up to the image's own; an image smaller than the smallest size is scaled up to it.
+    static func encodeIcon(_ image: CGImage, format: OutputFormat, to output: URL) throws {
+        let square = try squared(image)
+        var sizes = format.iconSizes.filter { $0 <= square.width }
+        if sizes.isEmpty { sizes = [format.iconSizes.last!] }
+        guard let dest = CGImageDestinationCreateWithURL(output as CFURL, format.type as CFString, sizes.count, nil) else { throw DiceError.message("This Mac cannot write \(format.rawValue) files.") }
+        for size in sizes { CGImageDestinationAddImage(dest, size == square.width ? square : try resample(square, longestEdge: size), nil) }
+        guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the \(format.rawValue) file.") }
+    }
+    /// A one-page PDF the size of the image (1 pixel = 1 point). Opaque images are embedded as JPEG at `quality`;
+    /// images with transparency are embedded losslessly.
+    static func encodePDFPage(_ image: CGImage, quality: Double, to output: URL) throws {
+        let opaque = [.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo)
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, (opaque ? UTType.jpeg : UTType.png).identifier as CFString, 1, nil) else { throw DiceError.message("Could not prepare the PDF page.") }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: min(1, max(0, quality))] as CFDictionary)
+        guard CGImageDestinationFinalize(dest), let provider = CGDataProvider(data: data),
+              let embedded = opaque ? CGImage(jpegDataProviderSource: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) : CGImage(pngDataProviderSource: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { throw DiceError.message("Could not prepare the PDF page.") }
+        var box = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        guard let ctx = CGContext(output as CFURL, mediaBox: &box, nil) else { throw DiceError.message("Could not write the PDF.") }
+        ctx.beginPDFPage(nil); ctx.draw(embedded, in: box); ctx.endPDFPage(); ctx.closePDF()
+    }
+    /// Joins single- or multi-page PDFs, in order, into one document.
+    public static func combinePDFs(_ inputs: [URL], to output: URL) throws {
+        guard !inputs.isEmpty else { throw DiceError.message("There are no PDF pages to combine.") }
+        var box = CGRect.zero
+        guard let ctx = CGContext(output as CFURL, mediaBox: &box, nil) else { throw DiceError.message("Could not write the combined PDF.") }
+        for url in inputs {
+            guard let document = CGPDFDocument(url as CFURL) else { throw DiceError.message("Could not read \(url.lastPathComponent) to combine it.") }
+            for index in 1...max(1, document.numberOfPages) {
+                guard let page = document.page(at: index) else { continue }
+                var media = page.getBoxRect(.mediaBox)
+                let info = [kCGPDFContextMediaBox as String: Data(bytes: &media, count: MemoryLayout<CGRect>.size)] as CFDictionary
+                ctx.beginPDFPage(info); ctx.drawPDFPage(page); ctx.endPDFPage()
+            }
+        }
+        ctx.closePDF()
+    }
+    /// Writes an animation in `format`: GIF, APNG and HEIC sequences through ImageIO, WebP through img2webp.
+    static func encodeAnimation(_ source: CGImageSource, frames total: Int, edge: Int, format: OutputFormat, options: Options, to output: URL) throws {
+        if format == .webp {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dice-frames-" + UUID().uuidString)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            var args = ["-loop", "0", options.webpLossless ? "-lossless" : "-lossy", "-q", String(Int(options.quality * 100))]
+            for index in 0..<total {
+                try autoreleasepool {
+                    let frame = folder.appendingPathComponent(String(format: "%05d.png", index))
+                    var still = options; still.optimizePNG = false
+                    try encode(try frameImage(source, index, maxPixelSize: edge), format: .png, options: still, to: frame)
+                    args += ["-d", String(max(10, Int((frameDelay(source, index) * 1000).rounded()))), frame.path]
+                }
+            }
+            _ = try run(toolsDirectory.appendingPathComponent("img2webp"), args + ["-o", output.path])
+            return
+        }
+        let (type, file, frame, loop, delay): (String, CFString, CFString, CFString, CFString) = switch format {
+        case .png: (UTType.png.identifier, kCGImagePropertyPNGDictionary, kCGImagePropertyPNGDictionary, kCGImagePropertyAPNGLoopCount, kCGImagePropertyAPNGDelayTime)
+        case .heic: ("public.heics", kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSLoopCount, kCGImagePropertyHEICSDelayTime)
+        default: (UTType.gif.identifier, kCGImagePropertyGIFDictionary, kCGImagePropertyGIFDictionary, kCGImagePropertyGIFLoopCount, kCGImagePropertyGIFDelayTime)
+        }
+        guard let dest = CGImageDestinationCreateWithURL(output as CFURL, type as CFString, total, nil) else { throw DiceError.message("This Mac cannot write animated \(format.rawValue).") }
+        CGImageDestinationSetProperties(dest, [file: [loop: 0]] as CFDictionary)
+        for index in 0..<total {
+            try autoreleasepool {
+                let image = try frameImage(source, index, maxPixelSize: edge)
+                CGImageDestinationAddImage(dest, image, [frame: [delay: frameDelay(source, index)], kCGImageDestinationLossyCompressionQuality: min(1, max(0, options.quality))] as CFDictionary)
+            }
+        }
+        guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the animated \(format.rawValue).") }
+    }
+    /// Animated input → an animation when the format can hold one and `keepAnimation`; otherwise a folder of numbered frames, or just the first frame.
     static func convertAnimated(_ input: URL, source: CGImageSource, format: OutputFormat, options: Options, info: ImageInfo, directory: URL) throws -> ConversionResult {
         let total = info.frames
         let edge = try options.longestEdge(width: info.width, height: info.height)
         let stem = input.deletingPathExtension().lastPathComponent
-        if format == .gif && options.keepAnimation {
-            let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: "gif")
-            guard let dest = CGImageDestinationCreateWithURL(output as CFURL, UTType.gif.identifier as CFString, total, nil) else { throw DiceError.message("This Mac cannot encode GIF.") }
-            CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
-            do {
-                for index in 0..<total {
-                    try autoreleasepool {
-                        let frame = try frameImage(source, index, maxPixelSize: edge)
-                        CGImageDestinationAddImage(dest, frame, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: frameDelay(source, index)]] as CFDictionary)
-                    }
-                }
-                guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the animated GIF.") }
-            } catch { try? FileManager.default.removeItem(at: output); throw error }
+        if format.animates && options.keepAnimation {
+            let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: format == .heic ? "heics" : format.ext)
+            do { try encodeAnimation(source, frames: total, edge: edge, format: format, options: options, to: output) }
+            catch { try? FileManager.default.removeItem(at: output); throw error }
             return ConversionResult(url: output, bytes: fileSize(output), note: "Animation kept (\(total) frames)")
         }
         let note = noAlpha.contains(format) ? "Transparency is flattened onto \(hex(options.flattenColor))" : nil

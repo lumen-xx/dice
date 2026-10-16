@@ -246,7 +246,7 @@ struct DiceView: View {
                 Text(Engine.hex(model.preferences.flattenColor)).font(DiceStyle.caption).foregroundStyle(.secondary).monospacedDigit()
                 Spacer(minLength: 0)
             }
-            HStack(spacing: 6) { Toggle("Keep animation when saving GIF", isOn: $model.preferences.keepAnimation); InfoTip("Animated GIFs stay animated when exported as GIF. Animated WebP and other animations can be read, but only GIF is written as an animation."); Spacer(minLength: 0) }
+            HStack(spacing: 6) { Toggle("Keep animations", isOn: $model.preferences.keepAnimation); InfoTip("Animated images stay animated when saved as GIF, PNG (APNG), WebP or HEIC. Other formats get a folder of frames or the first frame."); Spacer(minLength: 0) }
             Picker("Animated to other formats", selection: $model.preferences.framesAsFolder) {
                 Text("Folder of frames").tag(true); Text("First frame only").tag(false)
             }.tint(.primary)
@@ -299,6 +299,7 @@ struct DiceView: View {
                 if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { compressionRow }
                 if writesPNG { HStack(spacing: 6) { Toggle("Optimise PNG", isOn: $model.options.optimizePNG); InfoTip("Recompresses PNG files losslessly with oxipng: smaller files, identical pixels."); Spacer(minLength: 0) } }
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
+                if model.options.format == .pdf && model.items.count > 1 { HStack(spacing: 6) { Toggle("Combine into one PDF", isOn: $model.options.combinePDF); InfoTip("Every image becomes a page, in batch order, in a single PDF saved beside the first image."); Spacer(minLength: 0) } }
             }
             if !model.preferences.alwaysStripMetadata { Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly) }
             Divider()

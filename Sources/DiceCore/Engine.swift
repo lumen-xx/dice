@@ -9,7 +9,7 @@ public enum Engine {
         return Bundle.main.resourceURL!.appendingPathComponent("Tools")
     }
     public static func canEncode(_ format: OutputFormat) -> Bool {
-        format == .original || format == .webp || (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(format.type) == true
+        format == .original || format == .webp || format == .pdf || (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(format.type) == true
     }
     /// Reads the size from disk each time; URL resource values are cached and go stale when a file is rewritten.
     public static func fileSize(_ url: URL) -> Int64 { ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0 }
@@ -51,7 +51,7 @@ public enum Engine {
         return try run(URL(fileURLWithPath: "/usr/bin/perl"), ["-I", script.deletingLastPathComponent().appendingPathComponent("lib").path, script.path, "-config", ""] + args)
     }
     public static func pageCount(_ url: URL) throws -> Int {
-        if url.pathExtension.lowercased() == "pdf" { return try DocumentImage.pdf(url).numberOfPages }
+        if DocumentImage.isPDF(url) { return try DocumentImage.pdf(url).numberOfPages }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) as String?, type == UTType.tiff.identifier else { return 1 }
         return max(1, CGImageSourceGetCount(source))
     }
@@ -99,10 +99,10 @@ public enum Engine {
         let swapped: Bool
         if DocumentImage.isDocument(url) {
             (rawW, rawH, frames) = try DocumentImage.dimensions(url, page: page)
-            type = url.pathExtension.lowercased() == "pdf" ? UTType.pdf.identifier : UTType.svg.identifier
+            type = DocumentImage.isPDF(url) ? UTType.pdf.identifier : UTType.svg.identifier
             swapped = false
         } else {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let props = CGImageSourceCopyPropertiesAtIndex(source, imageIndex(source, page: page), nil) as? [String: Any] else { throw DiceError.message("This file or frame is not a supported image.") }
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let props = CGImageSourceCopyPropertiesAtIndex(source, imageIndex(source, page: page), nil) as? [String: Any] else { throw DiceError.message(DocumentImage.unsupportedReason(url) ?? "This file or frame is not a supported image.") }
             rawW = props[kCGImagePropertyPixelWidth as String] as? Int ?? 0
             rawH = props[kCGImagePropertyPixelHeight as String] as? Int ?? 0
             swapped = (5...8).contains(props[kCGImagePropertyOrientation as String] as? Int ?? 1)
@@ -119,7 +119,7 @@ public enum Engine {
     }
     static func metadataRows(_ url: URL) throws -> [MetadataRow] {
         let data: Data
-        if url.pathExtension.lowercased() == "svg" {
+        if DocumentImage.kind(url) == .svg {
             data = (try? exif(["-j", "-G1:4", "-a", "-u", "-s", "-struct", url.path])) ?? Data("[{}]".utf8)
         } else { data = try exif(["-j", "-G1:4", "-a", "-u", "-s", "-struct", url.path]) }
         guard let object = (try JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first else { throw DiceError.message("Could not read image metadata.") }
@@ -147,7 +147,7 @@ public enum Engine {
     public static func convert(_ input: URL, options: Options, directory: URL, page: Int = 1) throws -> ConversionResult {
         let document = DocumentImage.isDocument(input)
         let source = document ? nil : CGImageSourceCreateWithURL(input as CFURL, nil)
-        let inputType = document ? (input.pathExtension.lowercased() == "pdf" ? UTType.pdf.identifier : UTType.svg.identifier) : ((source.flatMap { CGImageSourceGetType($0) } as String?) ?? "")
+        let inputType = document ? (DocumentImage.isPDF(input) ? UTType.pdf.identifier : UTType.svg.identifier) : ((source.flatMap { CGImageSourceGetType($0) } as String?) ?? "")
         guard document || source != nil else { throw DiceError.message("This file is not a supported image.") }
         var format = options.format
         var notes: [String] = []
@@ -163,7 +163,7 @@ public enum Engine {
         if options.metadataOnly {
             let inputType = inputType
             guard metadataOnlyTypes.contains(inputType) else {
-                throw DiceError.message("Metadata-only removal supports JPEG, PNG, HEIC and WebP. Convert this image to one of those formats to remove personal metadata.")
+                throw DiceError.message("Metadata-only removal supports JPEG, PNG, HEIC, WebP, TIFF, AVIF, GIF and DNG. Convert this image to one of those formats to remove personal metadata.")
             }
             guard options.stripMetadata else { throw DiceError.message("Enable metadata removal for metadata-only mode.") }
             try FileManager.default.copyItem(at: input, to: output)
@@ -178,7 +178,7 @@ public enum Engine {
         let edge = try options.longestEdge(width: imageInfo.width, height: imageInfo.height, upscale: document)
         var image = document ? try DocumentImage.render(input, page: page, edge: edge) : try previewImage(input, maxPixelSize: edge, page: page)
         if noAlpha.contains(format) { image = try flatten(image, color: options.flattenColor); notes.append("Transparency is flattened onto \(hex(options.flattenColor))") }
-        if !options.stripMetadata && !document && !format.holdsMetadata { notes.append("\(format.rawValue) can't hold metadata, so none was kept") }
+        if !options.stripMetadata && !document && !format.holdsMetadata { notes.append("Metadata isn't copied into \(format.rawValue), so none was kept") }
         let target: Int64? = options.useTargetSize && format.fitsTargetSize(lossless: options.webpLossless) ? Int64(max(1, options.targetKB)) * 1000 : nil
         if options.useTargetSize && target == nil { notes.append("\(format.rawValue) has no quality setting, so the target size wasn't applied") }
         let keepMetadata = !options.stripMetadata && !document && format.holdsMetadata
@@ -215,7 +215,7 @@ public enum Engine {
         } catch { try? FileManager.default.removeItem(at: output); throw error }
     }
     /// Types whose metadata ExifTool can remove in place without touching pixels.
-    static let metadataOnlyTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "org.webmproject.webp"]
+    static let metadataOnlyTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "org.webmproject.webp", UTType.tiff.identifier, "public.avif", UTType.gif.identifier, "com.adobe.raw-image"]
     /// Removes personal metadata in place, keeping the colour profile and orientation.
     static func removeMetadata(_ url: URL) throws {
         _ = try exif(["-overwrite_original", "-all=", "-EXIF:all=", "-XMP:all=", "-IPTC:all=", "-MakerNotes:all=", "-Photoshop:all=", "-tagsFromFile", "@", "-ICC_Profile", "-Orientation", url.path])

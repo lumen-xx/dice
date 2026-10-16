@@ -8,17 +8,26 @@ public enum DiceError: LocalizedError {
     public var errorDescription: String? { if case let .message(s) = self { return s }; return nil }
 }
 public enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Codable {
-    case original = "Same as original", jpeg = "JPEG", png = "PNG", heic = "HEIC", webp = "WebP", gif = "GIF", bmp = "BMP", tiff = "TIFF", avif = "AVIF"
+    case original = "Same as original", jpeg = "JPEG", png = "PNG", heic = "HEIC", webp = "WebP", gif = "GIF", bmp = "BMP", tiff = "TIFF", avif = "AVIF", ico = "ICO", icns = "ICNS", pdf = "PDF"
     public var id: String { rawValue }
-    public var ext: String { switch self { case .jpeg: return "jpg"; case .png: return "png"; case .heic: return "heic"; case .webp: return "webp"; case .gif: return "gif"; case .bmp: return "bmp"; case .tiff: return "tiff"; case .avif: return "avif"; case .original: return "" } }
-    public var type: String { switch self { case .jpeg: return UTType.jpeg.identifier; case .png: return UTType.png.identifier; case .heic: return UTType.heic.identifier; case .webp: return "org.webmproject.webp"; case .gif: return UTType.gif.identifier; case .bmp: return UTType.bmp.identifier; case .tiff: return UTType.tiff.identifier; case .avif: return "public.avif"; case .original: return "" } }
-    public var usesQuality: Bool { [.original, .jpeg, .heic, .webp, .avif].contains(self) }
-    /// ExifTool cannot write BMP, so kept metadata is dropped there.
-    public var holdsMetadata: Bool { self != .bmp && self != .original }
+    public var ext: String { switch self { case .jpeg: return "jpg"; case .png: return "png"; case .heic: return "heic"; case .webp: return "webp"; case .gif: return "gif"; case .bmp: return "bmp"; case .tiff: return "tiff"; case .avif: return "avif"; case .ico: return "ico"; case .icns: return "icns"; case .pdf: return "pdf"; case .original: return "" } }
+    public var type: String { switch self { case .jpeg: return UTType.jpeg.identifier; case .png: return UTType.png.identifier; case .heic: return UTType.heic.identifier; case .webp: return "org.webmproject.webp"; case .gif: return UTType.gif.identifier; case .bmp: return UTType.bmp.identifier; case .tiff: return UTType.tiff.identifier; case .avif: return "public.avif"; case .ico: return UTType.ico.identifier; case .icns: return UTType.icns.identifier; case .pdf: return UTType.pdf.identifier; case .original: return "" } }
+    /// PDF pages embed opaque images as JPEG at this quality.
+    public var usesQuality: Bool { [.original, .jpeg, .heic, .webp, .avif, .pdf].contains(self) }
+    /// Formats ExifTool can copy image metadata into. BMP and icons have no room for it; PDF has its own document metadata.
+    public var holdsMetadata: Bool { ![.bmp, .ico, .icns, .pdf, .original].contains(self) }
+    /// Formats Dice writes as animations when the input is animated.
+    public var animates: Bool { [.gif, .png, .webp, .heic].contains(self) }
+    /// Multi-size icon files.
+    public var isIcon: Bool { self == .ico || self == .icns }
+    /// Icon sizes written, largest first. ICO stops at 256; ICNS goes to 1024 (512 @2x).
+    /// ImageIO writes at most six images into one ICO, so 64 px (the least used) is left out; ICNS has no 64 px slot.
+    public var iconSizes: [Int] { self == .ico ? [256, 128, 48, 32, 24, 16] : self == .icns ? [1024, 512, 256, 128, 32, 16] : [] }
     /// What "Same as original" writes for an input type. `exact` is false when Dice cannot write that type:
     /// HEIF variants become HEIC, camera and other photographic formats JPEG, everything else PNG.
     public static func matching(inputType: String) -> (format: OutputFormat, exact: Bool) {
-        if let same = allCases.first(where: { $0 != .original && $0.type == inputType }) { return (same, true) }
+        // Documents (PDF, SVG) rasterise to PNG; re-rendering a PDF into a PDF would only lose its vectors.
+        if let same = allCases.first(where: { $0 != .original && $0 != .pdf && $0.type == inputType }) { return (same, true) }
         let type = UTType(inputType)
         if ["public.heif", "public.heics", "public.avci"].contains(inputType) { return (.heic, false) }
         if inputType == "public.avis" { return (.avif, false) }
@@ -53,7 +62,7 @@ public struct Options: Sendable, Codable {
     public var replaceOriginals = false
     /// RGB (0...1) used in place of transparency when the output format has no alpha channel.
     public var flattenColor: [Double] = [1, 1, 1]
-    /// Keep animated images animated when the output is GIF.
+    /// Keep animated images animated when the output is GIF, PNG (APNG), WebP or HEIC (an image sequence).
     public var keepAnimation = true
     /// Animated images exported to a still format become a folder of frames; otherwise only the first frame is exported.
     public var framesAsFolder = true
@@ -66,6 +75,8 @@ public struct Options: Sendable, Codable {
     public var optimizePNG = true
     /// When re-encoding in the same format at the same size makes the file larger, keep the original's pixels.
     public var keepSmallerOriginal = true
+    /// PDF output: one combined PDF for the batch instead of one per image.
+    public var combinePDF = false
     public init() {}
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -89,6 +100,7 @@ public struct Options: Sendable, Codable {
         targetKB = try c.decodeIfPresent(Int.self, forKey: .targetKB) ?? targetKB
         optimizePNG = try c.decodeIfPresent(Bool.self, forKey: .optimizePNG) ?? optimizePNG
         keepSmallerOriginal = try c.decodeIfPresent(Bool.self, forKey: .keepSmallerOriginal) ?? keepSmallerOriginal
+        combinePDF = try c.decodeIfPresent(Bool.self, forKey: .combinePDF) ?? combinePDF
     }
     /// Choices that only make sense for the images they were made for; a new session starts without them.
     public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false }
@@ -131,4 +143,5 @@ public struct ConversionResult: Sendable {
     /// For folder results: a file inside the folder to show as the preview.
     public var previewURL: URL? = nil
     public var isFolder: Bool { (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+    public init(url: URL, bytes: Int64, note: String?, previewURL: URL? = nil) { self.url = url; self.bytes = bytes; self.note = note; self.previewURL = previewURL }
 }

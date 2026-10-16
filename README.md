@@ -13,7 +13,7 @@ Dice is not notarized yet.
 
 ## Use
 
-Drop images, PDFs, SVGs or folders on the window, paste with ⌘V, or right-click them in Finder → **Edit with Dice**. Adjust the settings (sliders icon), then press ▶. Results are saved beside the originals, in a default folder, or over the originals (moved to the Trash) if you choose **Replace originals**.
+Drop images, PDFs, SVGs or folders on the window, paste with ⌘V, or right-click them in Finder → **Edit with Dice**. Adjust the settings (sliders icon), then press ▶. Dice writes JPEG, PNG, HEIC, WebP, AVIF, GIF, TIFF, BMP, ICO, ICNS and PDF, keeps animations as GIF, APNG, animated WebP or HEIC, and can combine a batch into one PDF. Results are saved beside the originals, in a default folder, or over the originals (moved to the Trash) if you choose **Replace originals**.
 
 ![Image editor](docs/image.png)
 ![Metadata viewer](docs/metadata.png)
@@ -35,4 +35,4 @@ More: [style guide](docs/STYLE_GUIDE.md) · [validation](docs/VALIDATION.md) · 
 
 ## License
 
-[MIT](LICENSE). Dice bundles ExifTool, cwebp, resvg, oxipng and Sparkle under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Dice bundles ExifTool, cwebp and img2webp, resvg, oxipng and Sparkle under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -29,7 +29,7 @@ final class EngineTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
     func tearDownWithError() throws { try FileManager.default.removeItem(at: directory) }
-    func fixture(name: String = "image", width: Int = 120, height: Int = 80, format: String = UTType.jpeg.identifier) throws -> URL {
+    func fixture(name: String = "image", width: Int = 120, height: Int = 80, format: String = UTType.jpeg.identifier, quality: Double = 1) throws -> URL {
         let url = directory.appendingPathComponent(name + "." + (UTType(format)?.preferredFilenameExtension ?? "img"))
         var data = [UInt8](repeating: 0, count: width * height * 4)
         var rng: UInt32 = 12345
@@ -40,7 +40,7 @@ final class EngineTests {
         let provider = CGDataProvider(data: Data(data) as CFData)!
         let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width*4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
         let dest = CGImageDestinationCreateWithURL(url as CFURL, format as CFString, 1, nil)!
-        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 1] as CFDictionary)
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         XCTAssertTrue(CGImageDestinationFinalize(dest)); return url
     }
     func dimensions(_ url: URL) -> (Int,Int) {
@@ -124,11 +124,12 @@ final class EngineTests {
         XCTAssertTrue(try Engine.inspect(originalWebP.url).value("FileType")?.hasPrefix("WEBP") == true)
     }
     func testTIFFMetadataOnly() throws {
-        let input = try fixture(format: UTType.tiff.identifier)
-        _ = try runExif(["-overwrite_original", "-Artist=Remove me", input.path])
+        let input = try fixture(format: UTType.bmp.identifier)
+        let before = try Data(contentsOf: input)
         var options = Options(); options.metadataOnly = true
         XCTAssertThrowsError(try Engine.convert(input, options: options, directory: directory))
-        XCTAssertEqual(try Engine.inspect(input).value("Artist"),"Remove me")
+        XCTAssertEqual(try Data(contentsOf: input), before)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [input.lastPathComponent])
     }
     func testImageSearchAcrossMetadataAndText() throws {
         let input = try fixture(name: "Photo café", width: 120, height: 80)
@@ -257,7 +258,7 @@ final class EngineTests {
         var options = Options(); options.format = .gif
         let kept = try Engine.convert(input, options: options, directory: directory)
         XCTAssertEqual(CGImageSourceGetCount(CGImageSourceCreateWithURL(kept.url as CFURL, nil)!), 2)
-        options.format = .png
+        options.format = .png; options.keepAnimation = false
         let folder = try Engine.convert(input, options: options, directory: directory)
         XCTAssertTrue(folder.isFolder)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.url.path).sorted(), ["frame-0001.png", "frame-0002.png"])
@@ -373,17 +374,20 @@ final class EngineTests {
         var options = Options(); options.format = .bmp; options.stripMetadata = false
         let output = try Engine.convert(input, options: options, directory: directory)
         XCTAssertEqual(output.url.pathExtension, "bmp"); XCTAssertEqual(dimensions(output.url).0, 120)
-        XCTAssertTrue(output.note?.contains("can't hold metadata") == true)
+        XCTAssertTrue(output.note?.contains("isn't copied into BMP") == true)
     }
     func testMultiSizeIconsAreOneImage() throws {
         let input = directory.appendingPathComponent("app.ico")
         write([image(16), image(48), image(32)], to: input, type: .ico)
         let info = try Engine.inspect(input)
         XCTAssertEqual(info.frames, 1); XCTAssertEqual(info.width, 48)
-        let output = try Engine.convert(input, options: Options(), directory: directory)
+        var options = Options(); options.format = .png
+        let output = try Engine.convert(input, options: options, directory: directory)
         XCTAssertFalse(output.isFolder); XCTAssertEqual(dimensions(output.url).0, 48)
         XCTAssertEqual(output.url.pathExtension, "png")
-        XCTAssertTrue(output.note?.contains("Saved as PNG") == true)
+        // Same as original now writes ICO again, rebuilt from the largest size.
+        let same = try Engine.convert(input, options: Options(), directory: directory)
+        XCTAssertEqual(same.url.pathExtension, "ico"); XCTAssertNil(same.note)
     }
     func testWebPTemporaryKeepsOtherResults() throws {
         let input = try fixture(name: "photo", format: UTType.png.identifier)
@@ -535,6 +539,103 @@ final class EngineTests {
         options.keepSmallerOriginal = true; options.format = .png
         XCTAssertEqual(try Engine.convert(small.url, options: options, directory: directory).url.pathExtension, "png")
     }
+    func testSVGZIllustratorAndPostScript() throws {
+        let svg = directory.appendingPathComponent("packed.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='90' height='30'><rect width='90' height='30' fill='red'/></svg>".utf8).write(to: svg)
+        let gzip = Process(); gzip.executableURL = URL(fileURLWithPath: "/usr/bin/gzip"); gzip.arguments = ["-n", svg.path]
+        try gzip.run(); gzip.waitUntilExit()
+        let svgz = directory.appendingPathComponent("packed.svgz")
+        try FileManager.default.moveItem(at: directory.appendingPathComponent("packed.svg.gz"), to: svgz)
+        XCTAssertEqual(DocumentImage.kind(svgz), .svg)
+        var options = Options(); options.format = .png
+        XCTAssertEqual(dimensions(try Engine.convert(svgz, options: options, directory: directory).url).0, 90)
+        let ai = directory.appendingPathComponent("logo.ai")
+        try FileManager.default.copyItem(at: try pdfFixture(), to: ai)
+        XCTAssertEqual(try Engine.pageCount(ai), 2)
+        XCTAssertEqual(dimensions(try Engine.convert(ai, options: options, directory: directory).url).0, 200)
+        let legacy = directory.appendingPathComponent("legacy.ai"), eps = directory.appendingPathComponent("art.eps")
+        try Data("%!PS-Adobe-3.0\n".utf8).write(to: legacy); try Data("%!PS-Adobe-3.0 EPSF-3.0\n".utf8).write(to: eps)
+        func message(_ url: URL) -> String { do { _ = try Engine.convert(url, options: options, directory: directory); return "" } catch { return error.localizedDescription } }
+        XCTAssertTrue(message(legacy).contains("PDF compatibility")); XCTAssertTrue(message(eps).contains("PostScript"))
+    }
+    func testIconOutput() throws {
+        func sizes(_ url: URL) -> [Int] {
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil)!
+            return (0..<CGImageSourceGetCount(source)).map { i in
+                let p = CGImageSourceCopyPropertiesAtIndex(source, i, nil)! as NSDictionary
+                XCTAssertEqual(p[kCGImagePropertyPixelWidth] as? Int, p[kCGImagePropertyPixelHeight] as? Int)
+                return p[kCGImagePropertyPixelWidth] as! Int
+            }.sorted()
+        }
+        let wide = try fixture(name: "wide", width: 300, height: 200, format: UTType.png.identifier)
+        var options = Options(); options.format = .ico
+        let ico = try Engine.convert(wide, options: options, directory: directory)
+        XCTAssertEqual(ico.url.pathExtension, "ico"); XCTAssertEqual(sizes(ico.url), [16, 24, 32, 48, 128, 256])
+        // Padded, not stretched: the top row of a 300 × 200 image is transparent once squared.
+        let largest = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithURL(ico.url as CFURL, nil)!, 0, nil)!
+        XCTAssertEqual(largest.width, 256); XCTAssertEqual(rgba(largest, x: 128, y: 2)[3], 0); XCTAssertEqual(rgba(largest, x: 128, y: 128)[3], 255)
+        options.format = .icns
+        let big = try fixture(name: "big", width: 600, height: 600, format: UTType.png.identifier)
+        XCTAssertEqual(sizes(try Engine.convert(big, options: options, directory: directory).url), [16, 32, 128, 256, 512])
+        let tiny = try fixture(name: "tiny", width: 10, height: 10, format: UTType.png.identifier)
+        XCTAssertEqual(sizes(try Engine.convert(tiny, options: options, directory: directory).url), [16])
+    }
+    func testPDFOutputAndCombining() throws {
+        let photo = try fixture(width: 120, height: 80)
+        var options = Options(); options.format = .pdf
+        let page = try Engine.convert(photo, options: options, directory: directory)
+        XCTAssertEqual(page.url.pathExtension, "pdf")
+        let document = CGPDFDocument(page.url as CFURL)!
+        XCTAssertEqual(document.numberOfPages, 1)
+        XCTAssertEqual(document.page(at: 1)!.getBoxRect(.mediaBox).size, CGSize(width: 120, height: 80))
+        let clear = directory.appendingPathComponent("clear.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='10'/></svg>".utf8).write(to: clear)
+        XCTAssertEqual(CGPDFDocument(try Engine.convert(clear, options: options, directory: directory).url as CFURL)?.numberOfPages, 1)
+        let combined = directory.appendingPathComponent("combined.pdf")
+        try Engine.combinePDFs([page.url, try pdfFixture()], to: combined)
+        let joined = CGPDFDocument(combined as CFURL)!
+        XCTAssertEqual(joined.numberOfPages, 3)
+        XCTAssertEqual(joined.page(at: 1)!.getBoxRect(.mediaBox).size, CGSize(width: 120, height: 80))
+        XCTAssertEqual(joined.page(at: 3)!.getBoxRect(.mediaBox).size, CGSize(width: 100, height: 60))
+        XCTAssertThrowsError(try Engine.combinePDFs([], to: combined))
+    }
+    func testAnimationOutputs() throws {
+        let red = directory.appendingPathComponent("a.svg"), blue = directory.appendingPathComponent("b.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='red'/></svg>".utf8).write(to: red)
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><path d='M0 0h80v60H0z' fill='blue'/></svg>".utf8).write(to: blue)
+        let input = directory.appendingPathComponent("anim.gif")
+        write([try Engine.previewImage(red, maxPixelSize: 80), try Engine.previewImage(blue, maxPixelSize: 80), try Engine.previewImage(red, maxPixelSize: 80)], to: input, type: .gif)
+        for (format, ext) in [(OutputFormat.png, "png"), (.webp, "webp"), (.heic, "heics"), (.gif, "gif")] {
+            if !Engine.canEncode(format) { print("SKIP encoder unavailable: \(format.rawValue)"); continue }
+            var options = Options(); options.format = format; options.resize = .edge; options.edge = 40
+            let output = try Engine.convert(input, options: options, directory: directory)
+            XCTAssertEqual(output.url.pathExtension, ext); XCTAssertEqual(output.note, "Animation kept (3 frames)")
+            guard let source = CGImageSourceCreateWithURL(output.url as CFURL, nil) else { XCTAssertTrue(false); continue }
+            XCTAssertEqual(CGImageSourceGetCount(source), 3)
+            guard let middle = CGImageSourceCreateImageAtIndex(source, 1, nil) else { XCTAssertTrue(false); continue }
+            // The middle frame stays blue, at the resized width.
+            XCTAssertEqual(middle.width, 40); XCTAssertTrue(rgba(middle, x: 20, y: 15)[2] > 200)
+        }
+    }
+    func testAVIFAtFullQuality() throws {
+        guard Engine.canEncode(.avif) else { print("SKIP encoder unavailable: AVIF"); return }
+        var options = Options(); options.format = .avif; options.quality = 1
+        XCTAssertEqual(dimensions(try Engine.convert(try fixture(format: UTType.png.identifier), options: options, directory: directory).url).0, 120)
+    }
+    func testMetadataOnlyMoreFormats() throws {
+        for type in [UTType.tiff, .gif, UTType("public.avif")!] {
+            if CGImageDestinationCreateWithData(NSMutableData(), type.identifier as CFString, 1, nil) == nil { print("SKIP \(type.identifier)"); continue }
+            let input = try fixture(name: "personal", format: type.identifier, quality: 0.9)
+            _ = try runExif(["-overwrite_original", "-XMP-dc:Creator=Remove me", input.path])
+            XCTAssertTrue(try Engine.inspect(input).value("Creator")?.contains("Remove me") == true)
+            var options = Options(); options.metadataOnly = true
+            let output = try Engine.convert(input, options: options, directory: directory)
+            XCTAssertEqual(output.url.pathExtension, input.pathExtension)
+            XCTAssertNil(try Engine.inspect(output.url).value("Creator")); XCTAssertEqual(dimensions(output.url).0, 120)
+            XCTAssertTrue(try Engine.inspect(input).value("Creator")?.contains("Remove me") == true)
+            try FileManager.default.removeItem(at: input)
+        }
+    }
 }
 
 @main struct Checks {
@@ -575,7 +676,13 @@ final class EngineTests {
             ("flattening keeps wide-gamut colour", suite.testFlattenKeepsWideGamut),
             ("target file size", suite.testTargetFileSize),
             ("lossless PNG optimisation", suite.testPNGOptimisationIsLossless),
-            ("keep the original when it's smaller", suite.testKeepSmallerOriginal)
+            ("keep the original when it's smaller", suite.testKeepSmallerOriginal),
+            ("SVGZ, Illustrator and PostScript inputs", suite.testSVGZIllustratorAndPostScript),
+            ("ICO and ICNS output", suite.testIconOutput),
+            ("PDF output and combining", suite.testPDFOutputAndCombining),
+            ("animated PNG, WebP, HEIC and GIF output", suite.testAnimationOutputs),
+            ("metadata-only for TIFF, GIF and AVIF", suite.testMetadataOnlyMoreFormats),
+            ("AVIF at 100% quality", suite.testAVIFAtFullQuality)
         ]
         for (name, check) in checks {
             let before = failures

@@ -1,3 +1,17 @@
+# v0.2.2 formats — 2026-10-16
+
+All 41 standalone checks pass, six of them new. SVGZ renders like SVG; an Illustrator file saved with PDF compatibility opens as its PDF pages; an Illustrator file without it and an EPS file each fail with an explanation instead of a generic error. ICO output holds 16–256 px (ImageIO writes at most six images, so 64 px is left out) and ICNS 16–512 px for a 600 px image (ICNS has no 64 px slot); a 300 × 200 image is padded to a square, not stretched, and a 10 px image becomes a single 16 px icon. PDF output is one page the size of the image; combining a one-page and a two-page PDF gives three pages with their own sizes. A three-frame GIF saved as APNG, animated WebP (bundled img2webp 1.6.0), HEIC sequence and GIF keeps three frames at the resized width, with the middle frame's colour intact. Metadata-only removal works in place for TIFF, GIF and AVIF; DNG is enabled too but untested, with no DNG sample. The animation, SVGZ and AVIF checks were confirmed to fail with their change reverted.
+
+The checks found a bug in earlier versions: ImageIO's AVIF encoder fails at quality 1.0, so AVIF output at 100% quality gave "Could not write the converted image". AVIF quality now tops out at 0.99.
+
+Three existing checks were updated for intended changes: metadata-only rejection now uses BMP (TIFF is supported), "Same as original" for an ICO now writes an ICO, and an animated GIF saved as PNG needs Keep animations off to give a folder of frames.
+
+JPEG XL output was not added. Homebrew's cjxl 0.12 needs libjxl, OpenEXR, Imath, highway, brotli and lcms2, about 6.5 MB more, which puts the app over its 40 MB budget, and it needs a newer libpng than the one bundled for cwebp.
+
+Native review of Dice Dev with two JPEGs and PDF as the default format: Image settings shows PDF, Quality and "Combine into one PDF"; Start wrote `Combined-dice.pdf` beside the first image with pages of 400 × 300 and 300 × 500 points. The installed app is 35.2 MB. Not checked natively: animated output, ICO/ICNS and SVGZ in the app (covered by the engine checks only).
+
+---
+
 # v0.2.1 compression — 2026-10-16
 
 All 35 standalone checks pass, three of them new. Target file size: a 800 × 600 noise image fits 150 KB at full size; at 12 KB the image shrinks until it fits; with about 50 KB of kept XMP the result still fits; PNG output ignores the target with a note. PNG optimisation with the bundled oxipng 10.2.1 is smaller with identical decoded pixels. Keep the original when it's smaller: a quality-30% JPEG re-encoded at 100% keeps the original's bytes, with GPS and Artist removed when metadata removal is on; the setting off, or another format, keeps the re-encoded file. Each new check was confirmed to fail with its feature disabled.
