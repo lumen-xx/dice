@@ -138,9 +138,7 @@ struct DiceView: View {
                     .popover(isPresented: $imageSettingsPresented, arrowEdge: .top) { imageSettingsPanel }
             }
             if !model.settingsPresented {
-            Button { imageSettingsPresented = false; model.process() } label: { StartGlyph().frame(width: DiceStyle.controlSize, height: DiceStyle.controlSize).contentShape(Rectangle()) }
-                .help("Start with current settings (right-click for more export options)").accessibilityLabel("Start with current settings")
-                .disabled(model.busy || model.importing || model.items.isEmpty)
+            icon("play.fill", "Start with current settings (right-click for more export options)") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
                 .overlay { RightClickCatcher { if !(model.busy || model.importing || model.items.isEmpty) { exportPopoverPresented = true } } }
                 .popover(isPresented: $exportPopoverPresented, arrowEdge: .top) { exportPopover }
             }

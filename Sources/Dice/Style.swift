@@ -10,12 +10,10 @@ enum DiceStyle {
     static let violetRGB = (0.651, 0.361, 1.0)     // #A65CFF
     static let mint = color(mintRGB), cyan = color(cyanRGB), indigo = color(indigoRGB), violet = color(violetRGB)
     static let aurora: [Color] = [mint, cyan, indigo, violet]
-    /// The one solid accent: control tints, selection, menu icons. Indigo keeps 4:1 contrast on light and dark surfaces.
+    /// The one solid accent: Start, control tints, selection, menu icons. Indigo keeps 4:1 contrast on light and dark surfaces.
     static let accent = indigo
     static let nsAccent = nsColor(indigoRGB)
     static let nsAurora: [NSColor] = [mintRGB, cyanRGB, indigoRGB, violetRGB].map(nsColor)
-    /// Start's fill: the darker half of the aurora, so the white glyph stays legible.
-    static let startFill = LinearGradient(colors: [indigo, violet], startPoint: .topLeading, endPoint: .bottomTrailing)
     /// Closed loop for rings and the drop glow.
     static func auroraLoop(angle: Double = 0) -> AngularGradient { AngularGradient(colors: aurora + [mint], center: .center, angle: .degrees(angle)) }
     static let auroraMark = LinearGradient(colors: aurora, startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -36,21 +34,6 @@ enum DiceStyle {
 
     private static func color(_ c: (Double, Double, Double)) -> Color { Color(.sRGB, red: c.0, green: c.1, blue: c.2) }
     private static func nsColor(_ c: (Double, Double, Double)) -> NSColor { NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: 1) }
-}
-
-/// The primary action: an indigo-to-violet disc with a fine aurora rim. Increased contrast drops the gradient for solid indigo.
-struct StartGlyph: View {
-    @Environment(\.isEnabled) private var enabled
-    @Environment(\.colorSchemeContrast) private var contrast
-    var body: some View {
-        ZStack {
-            if contrast == .increased { Circle().fill(DiceStyle.accent) }
-            else { Circle().fill(DiceStyle.startFill); Circle().strokeBorder(DiceStyle.auroraLoop(), lineWidth: 1.25) }
-            Image(systemName: "play.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(.white).offset(x: 1)
-        }
-        .frame(width: 24, height: 24)
-        .saturation(enabled ? 1 : 0).opacity(enabled ? 1 : 0.4)
-    }
 }
 
 /// Determinate progress in the aurora loop. Moves only when `fraction` changes.

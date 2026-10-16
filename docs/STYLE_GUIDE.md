@@ -28,16 +28,16 @@ Dice's colour is **Aurora**, the light that runs around the window when a file i
 |---|---|---|
 | Mint | `#34E5B8` | Start of the loop; brightest moments |
 | Cyan | `#2BC4F2` | Loop and gradients |
-| Indigo | `#5E6BFF` | **The accent**: control tints, selection, menu icons, Start fill |
-| Violet | `#A65CFF` | End of the loop; Start fill |
+| Indigo | `#5E6BFF` | **The accent**: Start, control tints, selection, menu icons |
+| Violet | `#A65CFF` | End of the loop |
 
 The values live in `Sources/Dice/Style.swift` (`DiceStyle`), with SwiftUI and AppKit versions; `scripts/icon.swift` repeats them for the icon.
 
 How to use them:
 
-- **One solid accent.** Indigo is the only flat brand colour. Toggles, sliders, pickers, the selected batch row (14% indigo) and the export menu's icons use it. Indigo keeps about 4:1 contrast on both light and dark surfaces.
-- **Gradients are for brand moments only**: the drop glow and progress ring (the closed loop mint → cyan → indigo → violet → mint), the empty-state die (mint → violet, diagonal), and Start. Never put a gradient on text, on secondary controls or across large backgrounds.
-- **Start** is a 24 pt indigo → violet disc with a 1.25 pt aurora rim and a white play glyph, in the usual 30 pt target. The disc uses only the dark half of the palette so the white glyph stays legible. Disabled, it loses its colour and drops to 40% opacity. With Increase Contrast, it's solid indigo with no rim.
+- **One solid accent.** Indigo is the only flat brand colour. The Start play glyph, toggles, sliders, pickers, the selected batch row (14% indigo) and the export menu's icons use it. Indigo keeps about 4:1 contrast on both light and dark surfaces.
+- **Gradients are for brand moments only**: the drop glow and progress ring (the closed loop mint → cyan → indigo → violet → mint), the empty-state die (mint → violet, diagonal) and the app icon. Never put a gradient on text, on secondary controls or across large backgrounds.
+- **Start** is the plain play glyph in the toolbar, in indigo, with the standard 30 pt target. Disabled, it uses the native disabled appearance.
 - **Motion.** The glow turns only while an accepted file hovers over the window. The progress ring moves only when an image finishes. Nothing is animated while idle, and Reduce Motion stops both.
 - Primary and secondary system text colours carry content and supporting details. Errors use the system red; disabled controls use the native disabled appearance.
 - The window uses native HUD material with behind-window blur. The toolbar and pager use ultra-thin material, a capsule shape and a subtle 0.5 pt edge.
