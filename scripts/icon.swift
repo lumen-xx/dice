@@ -7,8 +7,12 @@ for size in [16,32,128,256,512] {
         let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         let p = CGFloat(pixels), inset = p * 0.09
-        NSColor(calibratedRed: 0.96, green: 0.35, blue: 0.10, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: inset,y: inset,width: p-2*inset,height: p-2*inset), xRadius: p*0.18,yRadius: p*0.18).fill()
+        // Aurora palette from Sources/Dice/Style.swift: mint top left → cyan → indigo → violet bottom right.
+        let aurora = [(0.204, 0.898, 0.722), (0.169, 0.769, 0.949), (0.369, 0.420, 1.0), (0.651, 0.361, 1.0)].map { NSColor(srgbRed: $0.0, green: $0.1, blue: $0.2, alpha: 1) }
+        let body = NSBezierPath(roundedRect: NSRect(x: inset,y: inset,width: p-2*inset,height: p-2*inset), xRadius: p*0.18,yRadius: p*0.18)
+        NSGradient(colors: aurora)!.draw(in: body, angle: -45)
+        // A soft shade keeps the white pips legible over the light mint corner.
+        NSGradient(colors: [NSColor.black.withAlphaComponent(0.18), NSColor.black.withAlphaComponent(0)])!.draw(in: body, angle: -45)
         NSColor.white.setFill()
         for (x,y) in [(0.32,0.32),(0.68,0.32),(0.5,0.5),(0.32,0.68),(0.68,0.68)] {
             NSBezierPath(ovalIn: NSRect(x: p*x-p*0.052,y: p*y-p*0.052,width: p*0.104,height: p*0.104)).fill()

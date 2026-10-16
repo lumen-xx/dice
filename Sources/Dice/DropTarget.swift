@@ -84,7 +84,7 @@ final class DropTargetView: NSVisualEffectView {
     private let title = NSTextField(labelWithString: "Drop to open")
     private let subtitle = NSTextField(labelWithString: "in Dice")
     private let icon = NSImageView()
-    private let tint = CALayer()
+    private let tint = CAGradientLayer()
     private let dashes = CAShapeLayer()
     private static let radius: CGFloat = 30
     override init(frame: NSRect) {
@@ -93,7 +93,8 @@ final class DropTargetView: NSVisualEffectView {
         wantsLayer = true
         layer?.cornerRadius = Self.radius; layer?.cornerCurve = .continuous; layer?.masksToBounds = true
         layer?.borderWidth = 1; layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
-        tint.backgroundColor = NSColor.clear.cgColor; layer?.addSublayer(tint)
+        tint.colors = DiceStyle.nsAurora.map { $0.withAlphaComponent(0.24).cgColor }
+        tint.startPoint = CGPoint(x: 0, y: 1); tint.endPoint = CGPoint(x: 1, y: 0); tint.opacity = 0; layer?.addSublayer(tint)
         dashes.fillColor = nil; dashes.lineWidth = 1.5; dashes.lineDashPattern = [5, 5]; dashes.lineCap = .round
         dashes.strokeColor = NSColor.white.withAlphaComponent(0.35).cgColor; layer?.addSublayer(dashes)
         icon.isEditable = false; icon.unregisterDraggedTypes()
@@ -119,8 +120,8 @@ final class DropTargetView: NSVisualEffectView {
         dashes.path = CGPath(roundedRect: bounds.insetBy(dx: 12, dy: 12), cornerWidth: Self.radius - 12, cornerHeight: Self.radius - 12, transform: nil)
     }
     func highlight(_ on: Bool) {
-        let accent = NSColor.controlAccentColor
-        tint.backgroundColor = (on ? accent.withAlphaComponent(0.22) : NSColor.clear).cgColor
+        let accent = DiceStyle.nsAccent
+        tint.opacity = on ? 1 : 0
         dashes.strokeColor = (on ? accent : NSColor.white.withAlphaComponent(0.35)).cgColor
         layer?.borderColor = (on ? accent.withAlphaComponent(0.8) : NSColor.white.withAlphaComponent(0.18)).cgColor
         icon.contentTintColor = on ? accent : .labelColor

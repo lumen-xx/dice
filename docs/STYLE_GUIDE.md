@@ -22,12 +22,25 @@ Avoid one-off font sizes in new UI. Text follows system light/dark appearance an
 
 ## Colour and material
 
-- Primary and secondary system text colours carry content and supporting details.
-- Accent orange is approximately `#F5591A`; reserve it for Start/Apply and selected-state emphasis.
-- The window uses native HUD material with behind-window blur.
-- Toolbar and pager use ultra-thin material, a capsule shape and a subtle 0.5 pt edge.
-- Errors use the system red; disabled controls use native disabled appearance.
-- Drag-over illuminates the entire window edge with a soft mint, cyan and violet aurora. Motion runs only during an accepted drag hover and stops with Reduce Motion enabled.
+Dice's colour is **Aurora**, the light that runs around the window when a file is dragged over it. It's one palette for the whole app: the drop glow, the Start button, progress, the empty-state mark, the app icon and the menu bar drop target all use the same four colours. There is no other brand colour.
+
+| Token | Hex (sRGB) | Role |
+|---|---|---|
+| Mint | `#34E5B8` | Start of the loop; brightest moments |
+| Cyan | `#2BC4F2` | Loop and gradients |
+| Indigo | `#5E6BFF` | **The accent**: control tints, selection, menu icons, Start fill |
+| Violet | `#A65CFF` | End of the loop; Start fill |
+
+The values live in `Sources/Dice/Style.swift` (`DiceStyle`), with SwiftUI and AppKit versions; `scripts/icon.swift` repeats them for the icon.
+
+How to use them:
+
+- **One solid accent.** Indigo is the only flat brand colour. Toggles, sliders, pickers, the selected batch row (14% indigo) and the export menu's icons use it. Indigo keeps about 4:1 contrast on both light and dark surfaces.
+- **Gradients are for brand moments only**: the drop glow and progress ring (the closed loop mint → cyan → indigo → violet → mint), the empty-state die (mint → violet, diagonal), and Start. Never put a gradient on text, on secondary controls or across large backgrounds.
+- **Start** is a 24 pt indigo → violet disc with a 1.25 pt aurora rim and a white play glyph, in the usual 30 pt target. The disc uses only the dark half of the palette so the white glyph stays legible. Disabled, it loses its colour and drops to 40% opacity. With Increase Contrast, it's solid indigo with no rim.
+- **Motion.** The glow turns only while an accepted file hovers over the window. The progress ring moves only when an image finishes. Nothing is animated while idle, and Reduce Motion stops both.
+- Primary and secondary system text colours carry content and supporting details. Errors use the system red; disabled controls use the native disabled appearance.
+- The window uses native HUD material with behind-window blur. The toolbar and pager use ultra-thin material, a capsule shape and a subtle 0.5 pt edge.
 
 ## Layout and interaction
 

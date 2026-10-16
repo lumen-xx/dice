@@ -1,3 +1,11 @@
+# v0.2.0 Aurora style — 2026-10-16
+
+Visual change only; no processing code changed and all 32 checks still pass. Orange is gone: `DiceStyle` defines the Aurora palette (mint `#34E5B8`, cyan `#2BC4F2`, indigo `#5E6BFF`, violet `#A65CFF`). Indigo is the single accent; gradients are used only for the drop glow, the progress ring, the empty-state die, Start and the app icon.
+
+Native review of Dice Dev in dark and forced-light appearance (`-NSRequiresAquaSystemAppearance YES`) verified the empty-state aurora die, the indigo-to-violet Start disc with its aurora rim (greyed while busy), indigo selection in the batch list, indigo checkbox, slider and picker tints in Image settings, and the aurora progress ring at 7 of 30 during a 30-image run. The README screenshots were retaken with the new icon. Not checked visually: the drop glow during a real drag, the menu bar drop target's highlight, and Increase Contrast's solid Start.
+
+---
+
 # v0.1.28 bug fixes — 2026-10-16
 
 All 32 standalone checks pass, including ten new ones, one per fixed bug: BMP output with metadata kept; multi-size icons as one image; the WebP temporary file never replacing another result; SVG and PDF rendering above their intrinsic size; "Same as original" fallbacks and when Quality applies; session-only choices resetting; PDF pages reusing file metadata (ExifTool unreachable for page 2); folder expansion with hidden files and a limit; the bundled-tool timeout; and wide-gamut flattening. Five engine checks were confirmed to fail with the old code put back (BMP, icons, WebP temporary, vector size, flattening).

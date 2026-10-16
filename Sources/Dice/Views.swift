@@ -45,7 +45,7 @@ struct DiceView: View {
                     .padding(.top, 64).padding(.bottom, model.items.isEmpty ? 16 : 58)
             } else if model.items.isEmpty {
                 VStack(spacing: 12) {
-                    Image(systemName: "die.face.5").font(DiceStyle.emptySymbol).foregroundStyle(.secondary)
+                    Image(systemName: "die.face.5").font(DiceStyle.emptySymbol).foregroundStyle(DiceStyle.auroraMark)
                     Button("Choose images…") { model.chooseFiles() }.buttonStyle(.plain).font(DiceStyle.body).foregroundStyle(.secondary)
                     Text("or drop them here").font(DiceStyle.caption).foregroundStyle(.tertiary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,7 +56,7 @@ struct DiceView: View {
                 VStack(spacing: 0) {
                     if model.busy {
                         VStack(spacing: 14) {
-                            ProgressView().controlSize(.large)
+                            AuroraProgress(fraction: model.items.isEmpty ? 0 : Double(model.completed) / Double(model.items.count))
                             Text(model.status).font(DiceStyle.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if let preview = displayedPreview {
@@ -138,7 +138,9 @@ struct DiceView: View {
                     .popover(isPresented: $imageSettingsPresented, arrowEdge: .top) { imageSettingsPanel }
             }
             if !model.settingsPresented {
-            icon("play.fill", "Start with current settings (right-click for more export options)") { imageSettingsPresented = false; model.process() }.foregroundStyle(accent).disabled(model.busy || model.importing || model.items.isEmpty)
+            Button { imageSettingsPresented = false; model.process() } label: { StartGlyph().frame(width: DiceStyle.controlSize, height: DiceStyle.controlSize).contentShape(Rectangle()) }
+                .help("Start with current settings (right-click for more export options)").accessibilityLabel("Start with current settings")
+                .disabled(model.busy || model.importing || model.items.isEmpty)
                 .overlay { RightClickCatcher { if !(model.busy || model.importing || model.items.isEmpty) { exportPopoverPresented = true } } }
                 .popover(isPresented: $exportPopoverPresented, arrowEdge: .top) { exportPopover }
             }
@@ -376,7 +378,7 @@ struct BatchPane: View {
                                 }.buttonStyle(.plain).help("Open \(item.name)")
                                 Button { model.remove(item.id) } label: { Image(systemName: "xmark").font(DiceStyle.caption).frame(width: 22,height: 26) }.buttonStyle(.plain).help("Remove from Dice; original stays in place").accessibilityLabel("Remove \(item.name)").disabled(model.busy || model.importing)
                             }.contextMenu { Button("Remove from Dice") { model.remove(item.id) }.disabled(model.busy || model.importing); Button("Move Original to Trash") { model.trashOriginal(item.id) }.disabled(model.busy || model.importing) }
-                            .padding(8).background(item.id == model.selected ? accent.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                            .padding(8).background(item.id == model.selected ? accent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 7))
                         }
                     }
                 }
