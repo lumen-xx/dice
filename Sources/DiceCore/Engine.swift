@@ -85,18 +85,22 @@ public enum Engine {
         guard let preview = context.makeImage() else { throw DiceError.message("Could not prepare an image preview.") }
         return preview
     }
-    public static func previewImage(_ url: URL, maxPixelSize: Int, page: Int = 1) throws -> CGImage {
+    /// `hdr`: for HDR sources, true decodes HDR pixels and false tone-maps to SDR; nil leaves ImageIO's default.
+    public static func previewImage(_ url: URL, maxPixelSize: Int, page: Int = 1, hdr: Bool? = nil) throws -> CGImage {
         if DocumentImage.isDocument(url) {
             let (w, h, _) = try DocumentImage.dimensions(url, page: page)
             return try DocumentImage.render(url, page: page, edge: min(max(w, h), maxPixelSize))
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, imageIndex(source, page: page), [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw DiceError.message("This image has no preview.") }
+        var decode: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true]
+        if let hdr { decode.merge(decodeRequest(hdr: hdr)) { $1 } }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, imageIndex(source, page: page), decode as CFDictionary) else { throw DiceError.message("This image has no preview.") }
         return image
     }
     /// `reusing` is another page of the same file: its file-level metadata is reused instead of running ExifTool again.
     public static func inspect(_ url: URL, page: Int = 1, reusing known: ImageInfo? = nil) throws -> ImageInfo {
         let rawW: Int, rawH: Int, frames: Int, type: String
         let swapped: Bool
+        var hdr = false
         if DocumentImage.isDocument(url) {
             (rawW, rawH, frames) = try DocumentImage.dimensions(url, page: page)
             type = DocumentImage.isPDF(url) ? UTType.pdf.identifier : UTType.svg.identifier
@@ -108,6 +112,7 @@ public enum Engine {
             swapped = (5...8).contains(props[kCGImagePropertyOrientation as String] as? Int ?? 1)
             type = (CGImageSourceGetType(source) as String?) ?? "Unknown"
             frames = frameCount(source)
+            hdr = isHDR(source, imageIndex(source, page: page))
         }
         var rows = try known.map { $0.rows.filter { $0.group != "Dice" } } ?? metadataRows(url)
         if DocumentImage.isDocument(url) {
@@ -115,7 +120,7 @@ public enum Engine {
             if type == UTType.pdf.identifier { rows += [MetadataRow(group: "Dice", name: "Page", value: "\(page) of \(frames)"), MetadataRow(group: "Dice", name: "RenderDPI", value: "144")] }
             rows.sort { ($0.group, $0.name) < ($1.group, $1.name) }
         }
-        return ImageInfo(width: swapped ? rawH : rawW, height: swapped ? rawW : rawH, bytes: fileSize(url), type: type, frames: frames, rows: rows)
+        return ImageInfo(width: swapped ? rawH : rawW, height: swapped ? rawW : rawH, bytes: fileSize(url), type: type, frames: frames, rows: rows, isHDR: hdr)
     }
     static func metadataRows(_ url: URL) throws -> [MetadataRow] {
         let data: Data
@@ -158,8 +163,10 @@ public enum Engine {
         }
         let count = try pageCount(input)
         let suffix = inputType == UTType.pdf.identifier || (inputType == UTType.tiff.identifier && count > 1) ? "-page-\(page)" : (count > 1 ? "-frame-\(page)" : "")
-        let stem = input.deletingPathExtension().lastPathComponent + suffix + options.fileSuffix
+        let base = input.deletingPathExtension().lastPathComponent + suffix
+        let stem = options.outputStem(base)
         let output = uniqueURL(in: directory, stem: stem, ext: options.metadataOnly ? input.pathExtension : format.ext)
+        let locationOnly = options.stripMetadata && options.removeLocationOnly
         if options.metadataOnly {
             let inputType = inputType
             guard metadataOnlyTypes.contains(inputType) else {
@@ -167,9 +174,9 @@ public enum Engine {
             }
             guard options.stripMetadata else { throw DiceError.message("Enable metadata removal for metadata-only mode.") }
             try FileManager.default.copyItem(at: input, to: output)
-            do { try removeMetadata(output) }
+            do { try locationOnly ? removeLocation(output) : removeMetadata(output) }
             catch { try? FileManager.default.removeItem(at: output); throw error }
-            return ConversionResult(url: output, bytes: fileSize(output), note: "Pixels unchanged; colour profile and orientation retained")
+            return ConversionResult(url: output, bytes: fileSize(output), note: locationOnly ? "Location removed; pixels and other metadata unchanged" : "Pixels unchanged; colour profile and orientation retained")
         }
         let imageInfo = try inspect(input, page: page)
         if let source, !document, count == 1, imageInfo.frames > 1, inputType != UTType.tiff.identifier {
@@ -178,21 +185,33 @@ public enum Engine {
         let (displayW, displayH) = displaySize(input, info: imageInfo, options: options)
         let geometry = try options.geometry(width: displayW, height: displayH, vector: document)
         if options.scaleSet && !format.isIcon && format != .pdf {
-            return try convertScaleSet(input, options: options, geometry: geometry, directory: directory, page: page, stem: stem)
+            return try convertScaleSet(input, options: options, geometry: geometry, directory: directory, page: page, stem: stem, base: base)
         }
-        var image = try shape(document ? try DocumentImage.render(input, page: page, edge: geometry.decodeEdge) : try previewImage(input, maxPixelSize: geometry.decodeEdge, page: page), geometry, options: options)
+        // HDR stays HDR only where a gain map can be written; elsewhere ImageIO tone-maps it to SDR.
+        let hdrInput = imageInfo.isHDR && !document && hdrAvailable
+        let keepHDR = hdrInput && options.keepHDR && !options.convertToSRGB && gainMapFormats.contains(format)
+        if keepHDR { notes.append("HDR kept") }
+        else if hdrInput && options.keepHDR { notes.append(options.convertToSRGB ? "HDR converted to SDR for sRGB" : "\(format.rawValue) can't hold HDR, so it was saved as SDR") }
+        var image = try shape(document ? try DocumentImage.render(input, page: page, edge: geometry.decodeEdge) : try previewImage(input, maxPixelSize: geometry.decodeEdge, page: page, hdr: hdrInput ? keepHDR : nil), geometry, options: options)
+        var recoloured = false
+        if options.convertToSRGB {
+            let converted = try toSRGB(image)
+            if converted !== image { image = converted; recoloured = true; notes.append("Converted to sRGB") }
+        }
         if noAlpha.contains(format) { image = try flatten(image, color: options.flattenColor); notes.append("Transparency is flattened onto \(hex(options.flattenColor))") }
         if !options.stripMetadata && !document && !format.holdsMetadata { notes.append("Metadata isn't copied into \(format.rawValue), so none was kept") }
         let target: Int64? = options.useTargetSize && format.fitsTargetSize(lossless: options.webpLossless) ? Int64(max(1, options.targetKB)) * 1000 : nil
         if options.useTargetSize && target == nil { notes.append("\(format.rawValue) has no quality setting, so the target size wasn't applied") }
-        let keepMetadata = !options.stripMetadata && !document && format.holdsMetadata
+        let keepMetadata = (!options.stripMetadata || locationOnly) && !document && format.holdsMetadata
+        // Rewriting an HDR file with ExifTool can drop its gain map, so HDR output gets its metadata from ImageIO.
+        let embedded = keepHDR && keepMetadata ? metadataForReencode(input, page: page, width: image.width, height: image.height) : nil
         var metadataBytes: Int64 = 0
         func write(budget: Int64?) throws {
             if let budget {
-                let fitted = try encode(image, format: format, options: options, to: output, budget: budget)
+                let fitted = try encode(image, format: format, options: options, to: output, budget: budget, metadata: embedded)
                 image = fitted.image; notes.removeAll { $0.hasPrefix("Fits ") }; notes.append(fitted.note)
-            } else { try encode(image, format: format, options: options, to: output) }
-            guard keepMetadata else { return }
+            } else { try encode(image, format: format, options: options, to: output, metadata: embedded) }
+            guard keepMetadata && !keepHDR else { return }
             let before = fileSize(output)
             // Preserve descriptive tags, but keep the profile that describes the newly encoded pixels.
             let profile = try exif(["-b", "-ICC_Profile", output.path])
@@ -211,8 +230,10 @@ public enum Engine {
                 guard target - metadataBytes > 0 else { throw DiceError.message("The kept metadata alone is larger than \(options.targetKB) KB. Remove personal metadata or choose a larger target.") }
                 try write(budget: target - metadataBytes)
             }
-            let sameShape = count == 1 && format.type == inputType && geometry.isIdentity(width: imageInfo.width, height: imageInfo.height)
-            if options.keepSmallerOriginal && !document && sameShape && fileSize(output) >= fileSize(input), let kept = try keepOriginal(input, at: output, removingMetadata: options.stripMetadata) {
+            if locationOnly && keepMetadata { try removeLocation(output); notes.append("Location removed; other metadata kept") }
+            if keepHDR && !hasGainMap(output) { notes.removeAll { $0 == "HDR kept" }; notes.append("HDR could not be kept") }
+            let sameShape = count == 1 && format.type == inputType && !recoloured && geometry.isIdentity(width: imageInfo.width, height: imageInfo.height)
+            if options.keepSmallerOriginal && !document && sameShape && fileSize(output) >= fileSize(input), let kept = try keepOriginal(input, at: output, removingMetadata: options.stripMetadata, locationOnly: locationOnly) {
                 return ConversionResult(url: output, bytes: fileSize(output), note: kept)
             }
             return ConversionResult(url: output, bytes: fileSize(output), note: notes.isEmpty ? nil : notes.joined(separator: ". "))
@@ -226,9 +247,8 @@ public enum Engine {
         return (max(1, Int((Double(info.width) * factor).rounded())), max(1, Int((Double(info.height) * factor).rounded())))
     }
     /// The planned output as @3x, plus @2x and @1x, in one folder: `name@3x.ext`, `name@2x.ext`, `name.ext`.
-    static func convertScaleSet(_ input: URL, options: Options, geometry: Geometry, directory: URL, page: Int, stem: String) throws -> ConversionResult {
+    static func convertScaleSet(_ input: URL, options: Options, geometry: Geometry, directory: URL, page: Int, stem: String, base name: String) throws -> ConversionResult {
         let folder = uniqueURL(in: directory, stem: stem, ext: "")
-        let name = String(stem.dropLast(options.fileSuffix.count))
         let scratch = directory.appendingPathComponent(".dice-scale-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
@@ -253,19 +273,29 @@ public enum Engine {
     /// Types whose metadata ExifTool can remove in place without touching pixels.
     static let metadataOnlyTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "org.webmproject.webp", UTType.tiff.identifier, "public.avif", UTType.gif.identifier, "com.adobe.raw-image"]
     /// Removes personal metadata in place, keeping the colour profile and orientation.
+    /// An HDR JPEG keeps its gain map (an MPF trailer image and its APP2 block), which `-all=` would delete; if the
+    /// gain map still goes missing, the file is left alone with an error rather than silently losing HDR.
     static func removeMetadata(_ url: URL) throws {
-        _ = try exif(["-overwrite_original", "-all=", "-EXIF:all=", "-XMP:all=", "-IPTC:all=", "-MakerNotes:all=", "-Photoshop:all=", "-tagsFromFile", "@", "-ICC_Profile", "-Orientation", url.path])
+        let hdr = hasGainMap(url)
+        let jpeg = (CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceGetType($0) } as String?) == UTType.jpeg.identifier
+        let groups = hdr && jpeg ? ["-EXIF:all=", "-XMP:all=", "--XMP-hdrgm:all", "--XMP-GContainer:all", "-IPTC:all=", "-MakerNotes:all=", "-Photoshop:all=", "-Comment="] : ["-all=", "-EXIF:all=", "-XMP:all=", "-IPTC:all=", "-MakerNotes:all=", "-Photoshop:all="]
+        _ = try exif(["-overwrite_original"] + groups + ["-tagsFromFile", "@", "-ICC_Profile", "-Orientation", url.path])
+        if hdr && !hasGainMap(url) { throw DiceError.message("Removing the metadata would also remove this photo's HDR, so Dice didn't change it.") }
+    }
+    /// Removes GPS coordinates and place names (EXIF, XMP and IPTC), keeping all other metadata.
+    static func removeLocation(_ url: URL) throws {
+        _ = try exif(["-overwrite_original", "-GPS:all=", "-XMP-exif:GPS*=", "-XMP-photoshop:City=", "-XMP-photoshop:State=", "-XMP-photoshop:Country=", "-XMP-iptcCore:Location=", "-XMP-iptcCore:CountryCode=", "-XMP-iptcExt:LocationCreated=", "-XMP-iptcExt:LocationShown=", "-IPTC:City=", "-IPTC:Sub-location=", "-IPTC:Province-State=", "-IPTC:Country-PrimaryLocationName=", "-IPTC:Country-PrimaryLocationCode=", url.path])
     }
     /// Puts the original's bytes at `output` when re-encoding made the file larger. Returns nil (leaving the
     /// re-encoded file) when metadata must go but can't be removed from this type in place.
-    static func keepOriginal(_ input: URL, at output: URL, removingMetadata: Bool) throws -> String? {
+    static func keepOriginal(_ input: URL, at output: URL, removingMetadata: Bool, locationOnly: Bool = false) throws -> String? {
         let type = (CGImageSourceCreateWithURL(input as CFURL, nil).flatMap { CGImageSourceGetType($0) } as String?) ?? ""
         if removingMetadata && !metadataOnlyTypes.contains(type) { return nil }
         let reencoded = output.deletingLastPathComponent().appendingPathComponent(".dice-reencoded-" + UUID().uuidString)
         try FileManager.default.moveItem(at: output, to: reencoded)
         do {
             try FileManager.default.copyItem(at: input, to: output)
-            if removingMetadata { try removeMetadata(output) }
+            if removingMetadata { try locationOnly ? removeLocation(output) : removeMetadata(output) }
             try? FileManager.default.removeItem(at: reencoded)
         } catch {
             try? FileManager.default.removeItem(at: output); try? FileManager.default.moveItem(at: reencoded, to: output); throw error

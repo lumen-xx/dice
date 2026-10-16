@@ -171,13 +171,12 @@ struct ImageItem: Identifiable {
         let exportDirectory = useFolder ? URL(fileURLWithPath: preferences.exportFolder) : nil
         var snapshot = options
         if let action { snapshot.replaceOriginals = action == .replace }
-        if preferences.alwaysStripMetadata { snapshot.stripMetadata = true }
+        if preferences.alwaysStripMetadata { snapshot.stripMetadata = true; snapshot.removeLocationOnly = false }
         snapshot.flattenColor = preferences.flattenColor
         snapshot.keepAnimation = preferences.keepAnimation
         snapshot.framesAsFolder = preferences.framesAsFolder
         snapshot.keepSmallerOriginal = preferences.keepSmallerOriginal
-        let suffix = preferences.fileSuffix.filter { !"/:\\".contains($0) }
-        snapshot.fileSuffix = suffix
+        snapshot.namePattern = preferences.namePattern
         let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly && !preferences.alwaysStripMetadata
         // Each image becomes a PDF page in the session; only the combined document is saved.
         let combine = snapshot.combinePDF && snapshot.format == .pdf && !snapshot.metadataOnly && !resizeOnly && items.count > 1
@@ -194,8 +193,10 @@ struct ImageItem: Identifiable {
                 guard items[index].info != nil else { completed += 1; continue }
                 let input = items[index].url, page = items[index].page, directory = session
                 status = "Processing \(index + 1) of \(items.count)…"
+                var numbered = snapshot; numbered.sequence = index + 1; numbered.sequenceCount = items.count
+                let options = numbered
                 let result = await Task.detached(priority: .userInitiated) { () -> Result<ConversionResult?, Error> in
-                    autoreleasepool { Result { resizeOnly ? try Engine.resize(input, options: snapshot, directory: directory, page: page) : try Engine.convert(input, options: snapshot, directory: directory, page: page) } }
+                    autoreleasepool { Result { resizeOnly ? try Engine.resize(input, options: options, directory: directory, page: page) : try Engine.convert(input, options: options, directory: directory, page: page) } }
                 }.value
                 switch result {
                 case .success(nil): items[index].error = nil
@@ -244,7 +245,8 @@ struct ImageItem: Identifiable {
             guard result.isFolder else { return [result.url] }
             return ((try? FileManager.default.contentsOfDirectory(at: result.url, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "pdf" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         }
-        let output = Engine.uniqueURL(in: session, stem: "Combined" + preferences.fileSuffix.filter { !"/:\\".contains($0) }, ext: "pdf")
+        var naming = Options(); naming.namePattern = preferences.namePattern; naming.sequenceCount = results.count
+        let output = Engine.uniqueURL(in: session, stem: naming.outputStem("Combined"), ext: "pdf")
         do {
             try await Task.detached(priority: .userInitiated) { try Engine.combinePDFs(pages, to: output) }.value
             let result = ConversionResult(url: output, bytes: Engine.fileSize(output), note: "\(pages.count) pages")

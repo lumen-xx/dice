@@ -12,9 +12,8 @@ extension Engine {
     /// Draws `image` over an opaque background of `color` so formats without alpha get a predictable fill.
     static func flatten(_ image: CGImage, color: [Double]) throws -> CGImage {
         let c = color + [1, 1, 1]
-        // Keep the image's own RGB space (Display P3, for instance) so flattening doesn't clip wide-gamut colour.
-        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw DiceError.message("Could not prepare the output image.") }
+        // Keep the image's own RGB space (Display P3, for instance) so flattening doesn't clip wide-gamut colour or HDR.
+        guard let ctx = canvas(like: image, width: image.width, height: image.height, opaque: true) else { throw DiceError.message("Could not prepare the output image.") }
         ctx.setFillColor(CGColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         guard let flat = ctx.makeImage() else { throw DiceError.message("Could not prepare the output image.") }
@@ -22,7 +21,8 @@ extension Engine {
     }
     /// Writes one still image in `format`; WebP goes through a temporary PNG and cwebp.
     /// The temporary PNG gets its own name, so it can never replace another result beside `output`.
-    static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL) throws {
+    /// HDR pixels are written with an ISO gain map. `metadata`, when given, is written by ImageIO with the image.
+    static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL, metadata: CGImageMetadata? = nil) throws {
         if format.isIcon { return try encodeIcon(image, format: format, to: output) }
         if format == .pdf { return try encodePDFPage(image, quality: options.quality, to: output) }
         let destination = format == .webp ? FileManager.default.temporaryDirectory.appendingPathComponent("dice-webp-" + UUID().uuidString + ".png") : output
@@ -32,7 +32,10 @@ extension Engine {
               let dest = CGImageDestinationCreateWithURL(destination as CFURL, type as CFString, 1, nil) else { throw DiceError.message("This Mac cannot encode the selected format.") }
         // The AVIF encoder fails outright at quality 1.0, so its top setting is 0.99 (visually the same).
         let ceiling = format == .avif ? 0.99 : 1
-        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: min(ceiling, max(0, options.quality)), kCGImagePropertyOrientation: 1] as CFDictionary)
+        var properties: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: min(ceiling, max(0, options.quality)), kCGImagePropertyOrientation: 1]
+        if #available(macOS 15, *), isHDR(image), gainMapFormats.contains(format) { properties[kCGImageDestinationEncodeRequest] = kCGImageDestinationEncodeToISOGainmap }
+        if let metadata { CGImageDestinationAddImageAndMetadata(dest, image, metadata, properties as CFDictionary) }
+        else { CGImageDestinationAddImage(dest, image, properties as CFDictionary) }
         guard CGImageDestinationFinalize(dest) else { throw DiceError.message("Could not write the converted image.") }
         if format == .png && options.optimizePNG { try optimizePNG(output) }
         if format == .webp {
@@ -146,7 +149,7 @@ extension Engine {
         let geometry = try options.geometry(width: info.width, height: info.height)
         let stem = input.deletingPathExtension().lastPathComponent
         if format.animates && options.keepAnimation {
-            let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: format == .heic ? "heics" : format.ext)
+            let output = uniqueURL(in: directory, stem: options.outputStem(stem), ext: format == .heic ? "heics" : format.ext)
             do { try encodeAnimation(source, frames: total, geometry: geometry, format: format, options: options, to: output) }
             catch { try? FileManager.default.removeItem(at: output); throw error }
             return ConversionResult(url: output, bytes: fileSize(output), note: "Animation kept (\(total) frames)")
@@ -160,11 +163,11 @@ extension Engine {
             }
         }
         if !options.framesAsFolder {
-            let output = uniqueURL(in: directory, stem: stem + options.fileSuffix, ext: format.ext)
+            let output = uniqueURL(in: directory, stem: options.outputStem(stem), ext: format.ext)
             do { try still(0, to: output) } catch { try? FileManager.default.removeItem(at: output); throw error }
             return ConversionResult(url: output, bytes: fileSize(output), note: note)
         }
-        let folder = uniqueURL(in: directory, stem: stem + "-frames" + options.fileSuffix, ext: "")
+        let folder = uniqueURL(in: directory, stem: options.outputStem(stem + "-frames"), ext: "")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         do {
             let digits = max(4, String(total).count)
@@ -180,6 +183,15 @@ extension Engine {
     /// descriptive metadata is copied back afterwards when the user keeps it.
     static func optimizePNG(_ url: URL) throws {
         _ = try run(toolsDirectory.appendingPathComponent("oxipng"), ["-q", "-o", "2", "--strip", "safe", url.path])
+    }
+    /// Converts to sRGB (8 bits per channel, SDR). Images already in sRGB are returned unchanged.
+    static func toSRGB(_ image: CGImage) throws -> CGImage {
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+        if image.colorSpace?.name == srgb.name && image.bitsPerComponent == 8 { return image }
+        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: srgb, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not convert the image to sRGB.") }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard let converted = ctx.makeImage() else { throw DiceError.message("Could not convert the image to sRGB.") }
+        return converted
     }
     /// Resamples to a longest edge, keeping the image's RGB colour space.
     static func resample(_ image: CGImage, longestEdge: Int) throws -> CGImage {
@@ -214,30 +226,28 @@ extension Engine {
         }
         if flipHorizontal { t = t.concatenating(CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: nw, ty: 0)) }
         if flipVertical { t = t.concatenating(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: nh)) }
-        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(data: nil, width: Int(nw), height: Int(nh), bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not rotate the image.") }
+        guard let ctx = canvas(like: image, width: Int(nw), height: Int(nh)) else { throw DiceError.message("Could not rotate the image.") }
         ctx.concatenate(t); ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         guard let turnedImage = ctx.makeImage() else { throw DiceError.message("Could not rotate the image.") }
         return turnedImage
     }
     /// Resamples to an exact size, keeping the image's RGB colour space.
     static func resample(_ image: CGImage, width w: Int, height h: Int) throws -> CGImage {
-        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw DiceError.message("Could not resize the image.") }
+        guard let ctx = canvas(like: image, width: w, height: h) else { throw DiceError.message("Could not resize the image.") }
         ctx.interpolationQuality = .high; ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         guard let scaled = ctx.makeImage() else { throw DiceError.message("Could not resize the image.") }
         return scaled
     }
     /// Writes `image` at the highest quality whose file fits `budget` bytes, searching quality first and then,
     /// when even the lowest quality is too large, shrinking the image. Returns the image written and a note.
-    static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL, budget: Int64) throws -> (image: CGImage, note: String) {
+    static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL, budget: Int64, metadata: CGImageMetadata? = nil) throws -> (image: CGImage, note: String) {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("dice-target-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         func attempt(_ image: CGImage, _ quality: Double) throws -> (URL, Int64) {
             var o = options; o.quality = quality
             let url = scratch.appendingPathComponent(UUID().uuidString + "." + format.ext)
-            try encode(image, format: format, options: o, to: url)
+            try encode(image, format: format, options: o, to: url, metadata: metadata)
             return (url, fileSize(url))
         }
         let floor = 0.05

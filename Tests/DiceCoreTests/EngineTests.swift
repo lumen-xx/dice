@@ -275,7 +275,7 @@ final class EngineTests {
         let jpeg = try Engine.convert(clear, options: options, directory: directory)
         let pixel = rgba(try Engine.previewImage(jpeg.url, maxPixelSize: 40), x: 20, y: 20)
         XCTAssertTrue(pixel[1] > 200 && pixel[0] < 60 && pixel[2] < 60)
-        options.fileSuffix = "-small"
+        options.namePattern = "{name}-small"
         XCTAssertTrue(try Engine.convert(clear, options: options, directory: directory).url.lastPathComponent.contains("-small"))
     }
     func testResizeOnlySkipsSmallAndPreservesMetadata() throws {
@@ -736,6 +736,118 @@ final class EngineTests {
         let source = CGImageSourceCreateWithURL(output.url as CFURL, nil)!
         XCTAssertEqual(CGImageSourceGetCount(source), 2); XCTAssertTrue(dimensions(output.url) == (20, 30))
     }
+    func testNamePatterns() throws {
+        var o = Options()
+        XCTAssertEqual(o.outputStem("photo"), "photo-dice")
+        o.namePattern = "{n}-{name}"; o.sequence = 3; o.sequenceCount = 120
+        XCTAssertEqual(o.outputStem("photo"), "003-photo")
+        o.namePattern = "trip {n}"; o.sequenceCount = 4
+        XCTAssertEqual(o.outputStem("photo"), "trip 03")
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"
+        o.namePattern = "{date}_{name}"
+        XCTAssertEqual(o.outputStem("photo"), formatter.string(from: Date()) + "_photo")
+        o.namePattern = " "; XCTAssertEqual(o.outputStem("photo"), "photo")
+        o.namePattern = "a/b:{name}"; XCTAssertEqual(o.outputStem("photo"), "abphoto")
+        o.namePattern = ".{name}"; XCTAssertEqual(o.outputStem("photo"), "photo.photo")
+        let input = try fixture(name: "photo", format: UTType.png.identifier)
+        o = Options(); o.format = .png; o.namePattern = "{n} {name}"; o.sequence = 2; o.sequenceCount = 5
+        XCTAssertEqual(try Engine.convert(input, options: o, directory: directory).url.lastPathComponent, "02 photo.png")
+        let pdf = try pdfFixture()
+        XCTAssertEqual(try Engine.convert(pdf, options: o, directory: directory, page: 2).url.lastPathComponent, "02 two pages-page-2.png")
+    }
+    func testConvertToSRGB() throws {
+        let input = directory.appendingPathComponent("p3.png")
+        write([image(16, space: CGColorSpace(name: CGColorSpace.displayP3)!)], to: input, type: .png)
+        var o = Options(); o.convertToSRGB = true
+        let output = try Engine.convert(input, options: o, directory: directory)
+        let props = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithURL(output.url as CFURL, nil)!, 0, nil)! as NSDictionary
+        XCTAssertTrue((props[kCGImagePropertyProfileName] as? String)?.contains("sRGB") == true)
+        XCTAssertTrue(output.note?.contains("Converted to sRGB") == true)
+        // P3's pure green is outside sRGB: it clips to sRGB green rather than keeping the same numbers.
+        let pixel = rgba(try Engine.previewImage(output.url, maxPixelSize: 16), x: 8, y: 8)
+        XCTAssertTrue(pixel[1] > 240 && pixel[0] < 10)
+        let srgb = try fixture(name: "plain", format: UTType.png.identifier)
+        XCTAssertNil(try Engine.convert(srgb, options: o, directory: directory).note)
+    }
+    /// A gain-map HDR photo: left half SDR grey, right half four times SDR white.
+    func hdrFixture(_ name: String, type: UTType) throws -> URL {
+        let url = directory.appendingPathComponent(name + "." + type.preferredFilenameExtension!)
+        let space = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
+        let c = CGContext(data: nil, width: 64, height: 32, bitsPerComponent: 16, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+        c.setFillColor(CGColor(colorSpace: space, components: [0.5, 0.5, 0.5, 1])!); c.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        c.setFillColor(CGColor(colorSpace: space, components: [4, 4, 4, 1])!); c.fill(CGRect(x: 32, y: 0, width: 32, height: 32))
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)!
+        if #available(macOS 15, *) { CGImageDestinationAddImage(dest, c.makeImage()!, [kCGImageDestinationEncodeRequest: kCGImageDestinationEncodeToISOGainmap] as CFDictionary) }
+        XCTAssertTrue(CGImageDestinationFinalize(dest)); return url
+    }
+    func gainMap(_ url: URL) -> Bool {
+        guard #available(macOS 15, *), let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return false }
+        return CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap) != nil
+    }
+    func testHDRKeptOrToneMapped() throws {
+        guard #available(macOS 15, *) else { print("SKIP HDR needs macOS 15"); return }
+        let jpeg = try hdrFixture("hdr", type: .jpeg)
+        _ = try runExif(["-overwrite_original", "-Artist=Keep me", "-GPSLatitude=48.1", "-GPSLatitudeRef=N", "-GPSLongitude=11.5", "-GPSLongitudeRef=E", "-XMP-photoshop:City=Munich", jpeg.path])
+        XCTAssertTrue(gainMap(jpeg)); XCTAssertTrue(try Engine.inspect(jpeg).isHDR)
+        XCTAssertFalse(try Engine.inspect(try fixture()).isHDR)
+        var o = Options(); o.format = .heic; o.stripMetadata = false
+        let kept = try Engine.convert(jpeg, options: o, directory: directory)
+        XCTAssertTrue(gainMap(kept.url)); XCTAssertTrue(kept.note?.contains("HDR kept") == true)
+        let tags = try Engine.inspect(kept.url)
+        XCTAssertTrue(tags.hasGPS); XCTAssertTrue(tags.value("Creator")?.contains("Keep me") == true || tags.value("Artist") == "Keep me")
+        // Location only: HDR and the other tags stay.
+        o.stripMetadata = true; o.removeLocationOnly = true
+        let located = try Engine.convert(jpeg, options: o, directory: directory)
+        let rest = try Engine.inspect(located.url)
+        XCTAssertTrue(gainMap(located.url)); XCTAssertFalse(rest.hasGPS); XCTAssertNil(rest.value("City"))
+        XCTAssertTrue(rest.value("Creator")?.contains("Keep me") == true || rest.value("Artist") == "Keep me")
+        // Resized and rotated HDR stays HDR in each gain-map format.
+        for format in [OutputFormat.jpeg, .heic, .avif] {
+            var r = Options(); r.format = format; r.rotation = 90; r.resize = .edge; r.edge = 32
+            let turned = try Engine.convert(jpeg, options: r, directory: directory)
+            XCTAssertTrue(gainMap(turned.url)); XCTAssertTrue(dimensions(turned.url) == (16, 32))
+        }
+        o = Options(); o.format = .png
+        let png = try Engine.convert(jpeg, options: o, directory: directory)
+        XCTAssertFalse(gainMap(png.url)); XCTAssertTrue(png.note?.contains("PNG can't hold HDR") == true)
+        o.format = .heic; o.keepHDR = false
+        let sdr = try Engine.convert(jpeg, options: o, directory: directory)
+        XCTAssertFalse(gainMap(sdr.url)); XCTAssertNil(sdr.note)
+        o.keepHDR = true; o.convertToSRGB = true
+        XCTAssertFalse(gainMap(try Engine.convert(jpeg, options: o, directory: directory).url))
+    }
+    func testMetadataOnlyKeepsHDR() throws {
+        guard #available(macOS 15, *) else { print("SKIP HDR needs macOS 15"); return }
+        for type in [UTType.jpeg, .heic, UTType("public.avif")!] {
+            let input = try hdrFixture("personal-hdr", type: type)
+            if type == .jpeg { _ = try runExif(["-overwrite_original", "-Artist=Remove me", "-GPSLatitude=48.1", "-GPSLatitudeRef=N", input.path]) }
+            var o = Options(); o.metadataOnly = true
+            let output = try Engine.convert(input, options: o, directory: directory)
+            XCTAssertTrue(gainMap(output.url)); XCTAssertNil(try Engine.inspect(output.url).value("Artist")); XCTAssertFalse(try Engine.inspect(output.url).hasGPS)
+            try FileManager.default.removeItem(at: input)
+        }
+    }
+    func testLocationOnlyRemoval() throws {
+        let input = try fixture(name: "trip")
+        _ = try runExif(["-overwrite_original", "-Artist=Keep me", "-GPSLatitude=48.1", "-GPSLatitudeRef=N", "-GPSLongitude=11.5", "-GPSLongitudeRef=E", "-IPTC:City=Munich", "-XMP-photoshop:City=Munich", "-XMP-iptcCore:Location=Old town", input.path])
+        var o = Options(); o.metadataOnly = true; o.removeLocationOnly = true
+        let inPlace = try Engine.convert(input, options: o, directory: directory)
+        let a = try Engine.inspect(inPlace.url)
+        XCTAssertEqual(a.value("Artist"), "Keep me"); XCTAssertFalse(a.hasGPS); XCTAssertNil(a.value("City")); XCTAssertNil(a.value("Location"))
+        XCTAssertTrue(inPlace.note?.hasPrefix("Location removed") == true)
+        o.metadataOnly = false; o.format = .png
+        let converted = try Engine.convert(input, options: o, directory: directory)
+        let b = try Engine.inspect(converted.url)
+        XCTAssertEqual(b.value("Artist"), "Keep me"); XCTAssertFalse(b.hasGPS); XCTAssertNil(b.value("City"))
+        XCTAssertTrue(converted.note?.contains("Location removed; other metadata kept") == true)
+        // Off: location stays; full removal: everything goes.
+        o.removeLocationOnly = false; o.stripMetadata = false
+        XCTAssertTrue(try Engine.inspect(try Engine.convert(input, options: o, directory: directory).url).hasGPS)
+        o.stripMetadata = true
+        let stripped = try Engine.inspect(try Engine.convert(input, options: o, directory: directory).url)
+        XCTAssertNil(stripped.value("Artist")); XCTAssertFalse(stripped.hasGPS)
+        var reset = Options(); reset.removeLocationOnly = true; reset.resetSessionChoices(); XCTAssertFalse(reset.removeLocationOnly)
+    }
 }
 
 @main struct Checks {
@@ -786,7 +898,12 @@ final class EngineTests {
             ("width, height, fill, enlarging, rotation and crop plans", suite.testGeometryModes),
             ("rotate, flip and centred crop pixels", suite.testRotateFlipAndCrop),
             ("fill and crop, enlarging, @1x–@3x sets and PDF resolution", suite.testFillUpscaleScaleSetsAndPDFResolution),
-            ("animations rotate frame by frame", suite.testAnimationsRotate)
+            ("animations rotate frame by frame", suite.testAnimationsRotate),
+            ("file name patterns", suite.testNamePatterns),
+            ("convert to sRGB", suite.testConvertToSRGB),
+            ("HDR kept with gain maps, or tone-mapped", suite.testHDRKeptOrToneMapped),
+            ("metadata-only removal keeps HDR", suite.testMetadataOnlyKeepsHDR),
+            ("location-only metadata removal", suite.testLocationOnlyRemoval)
         ]
         for (name, check) in checks {
             let before = failures

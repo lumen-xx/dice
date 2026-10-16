@@ -155,7 +155,7 @@ struct DiceView: View {
             Text("\(count) of \(model.items.count) images").font(DiceStyle.caption).foregroundStyle(.secondary)
         } else if let info = currentInfo {
             HStack(spacing: 6) {
-                Text("\(info.width) × \(info.height) · \(info.value("FileType") ?? "Image") · \(bytes(info.bytes))")
+                Text("\(info.width) × \(info.height) · \(info.value("FileType") ?? "Image")\(info.isHDR ? " HDR" : "") · \(bytes(info.bytes))")
                 if model.selection?.savedURL != nil { Image(systemName: "checkmark").help(model.selection?.savedURL?.path ?? "Saved copy").accessibilityLabel("Copy saved") }
                 if metadata {
                     Text("· \(info.rows.count) tags")
@@ -251,7 +251,7 @@ struct DiceView: View {
                 Text("Folder of frames").tag(true); Text("First frame only").tag(false)
             }.tint(.primary)
             HStack(spacing: 6) { Toggle("Keep the original when it's smaller", isOn: $model.preferences.keepSmallerOriginal); InfoTip("If re-encoding in the same format and size makes a file larger, Dice keeps the original's pixels instead. Personal metadata is still removed when that's on."); Spacer(minLength: 0) }
-            HStack { Text("Filename suffix"); TextField("none", text: $model.preferences.fileSuffix).textFieldStyle(.roundedBorder).frame(width: 110); Spacer(minLength: 0) }
+            HStack(spacing: 6) { Text("File name"); TextField("{name}-dice", text: $model.preferences.namePattern).textFieldStyle(.roundedBorder).frame(width: 150); InfoTip("{name} is the original name, {n} the image's number in the batch (01, 02…), {date} today's date. Replace originals keeps the original name."); Spacer(minLength: 0) }
             Toggle("Close Dice when finished", isOn: $model.preferences.closeWhenDone)
             Divider().padding(.vertical, 4)
             Text("General").font(DiceStyle.heading)
@@ -304,7 +304,11 @@ struct DiceView: View {
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
                 if model.options.format == .pdf && model.items.count > 1 { HStack(spacing: 6) { Toggle("Combine into one PDF", isOn: $model.options.combinePDF); InfoTip("Every image becomes a page, in batch order, in a single PDF saved beside the first image."); Spacer(minLength: 0) } }
             }
-            if !model.preferences.alwaysStripMetadata { Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly) }
+            if !model.preferences.alwaysStripMetadata {
+                Picker("Metadata", selection: metadataChoice) {
+                    Text("Keep").tag(0).disabled(model.options.metadataOnly); Text("Remove location").tag(1); Text("Remove personal").tag(2)
+                }.tint(.primary)
+            }
             Divider()
             HStack(spacing: 6) { Toggle("Replace originals", isOn: $model.options.replaceOriginals); InfoTip("Move each original to the Trash and save the result under its name. PDFs, SVGs and multi-frame files are always saved as copies."); Spacer(minLength: 0) }
         }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 360).tint(accent)
@@ -323,10 +327,16 @@ struct DiceView: View {
             } else { Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() }
         }
     }
-    /// Rotation, flips, crop, enlarging, scale sets and PDF resolution behind one menu, so the popover keeps its size.
+    /// Keep, location only (GPS and place names), or all personal metadata.
+    var metadataChoice: Binding<Int> {
+        Binding(get: { !model.options.stripMetadata ? 0 : model.options.removeLocationOnly ? 1 : 2 },
+                set: { model.options.stripMetadata = $0 != 0; model.options.removeLocationOnly = $0 == 1 })
+    }
+    var batchHasHDR: Bool { model.items.contains { $0.info?.isHDR == true } }
+    /// Rotation, flips, crop, enlarging, scale sets, PDF resolution and colour behind one menu, so the popover keeps its size.
     var shapeRow: some View {
         HStack(spacing: 6) {
-            Text("Shape")
+            Text("Adjust")
             Menu {
                 Picker("Rotate", selection: $model.options.rotation) { Text("None").tag(0); Text("90° clockwise").tag(90); Text("180°").tag(180); Text("90° anticlockwise").tag(270) }
                 Toggle("Flip horizontally", isOn: $model.options.flipHorizontal)
@@ -338,8 +348,11 @@ struct DiceView: View {
                 if model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) {
                     Picker("PDF resolution", selection: $model.options.pdfDPI) { ForEach([72, 144, 300, 600], id: \.self) { Text("\($0) dpi").tag($0) } }
                 }
+                Divider()
+                Toggle("Convert to sRGB", isOn: $model.options.convertToSRGB)
+                if batchHasHDR { Toggle("Keep HDR", isOn: $model.options.keepHDR) }
             } label: { Text(shapeLabel).lineLimit(1) }
-                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Rotate, flip, crop, enlarge, or save @1x–@3x sets")
+                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Rotate, flip, crop, enlarge, save @1x–@3x sets, or convert colours")
             if model.options.scaleSet { InfoTip("The result is the @3x image; @2x and @1x are saved beside it in one folder.") }
             Spacer(minLength: 0)
         }
@@ -349,6 +362,8 @@ struct DiceView: View {
         if model.options.upscale { parts.append("Enlarge") }
         if model.options.scaleSet { parts.append("@1–3x") }
         if model.options.pdfDPI != 144 && model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) { parts.append("\(model.options.pdfDPI) dpi") }
+        if model.options.convertToSRGB { parts.append("sRGB") }
+        if !model.options.keepHDR && batchHasHDR { parts.append("SDR") }
         return parts.isEmpty ? "As is" : parts.joined(separator: ", ")
     }
     var writesPNG: Bool { model.items.contains { model.options.format == .png || (model.options.format == .original && OutputFormat.matching(inputType: $0.info?.type ?? "").format == .png) } }

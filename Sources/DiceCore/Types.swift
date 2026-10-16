@@ -86,8 +86,11 @@ public struct Options: Sendable, Codable {
     public var keepAnimation = true
     /// Animated images exported to a still format become a folder of frames; otherwise only the first frame is exported.
     public var framesAsFolder = true
-    /// Appended to the original name for saved copies.
-    public var fileSuffix = "-dice"
+    /// Output file name: `{name}` is the original's name, `{n}` the image's number in the batch, `{date}` today.
+    public var namePattern = "{name}-dice"
+    /// This image's position in the batch and the batch size, for `{n}`. Set per image, not saved.
+    public var sequence = 1
+    public var sequenceCount = 1
     /// Lossy formats: search for the highest quality that fits `targetKB` (1 KB = 1000 bytes) instead of using `quality`.
     public var useTargetSize = false
     public var targetKB = 500
@@ -108,6 +111,12 @@ public struct Options: Sendable, Codable {
     public var scaleSet = false
     /// PDF pages render at this resolution for "Original size" (and as the base for percentages).
     public var pdfDPI = 144
+    /// HDR photos stay HDR (with a gain map) when saved as HEIC, JPEG or AVIF; otherwise they are tone-mapped to SDR.
+    public var keepHDR = true
+    /// Convert colours to sRGB (SDR, 8 bits per channel), for the web and apps that ignore colour profiles.
+    public var convertToSRGB = false
+    /// With `stripMetadata`: remove only location (GPS coordinates and place names) and keep the rest.
+    public var removeLocationOnly = false
     public init() {}
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -126,7 +135,7 @@ public struct Options: Sendable, Codable {
         flattenColor = try c.decodeIfPresent([Double].self, forKey: .flattenColor) ?? flattenColor
         keepAnimation = try c.decodeIfPresent(Bool.self, forKey: .keepAnimation) ?? keepAnimation
         framesAsFolder = try c.decodeIfPresent(Bool.self, forKey: .framesAsFolder) ?? framesAsFolder
-        fileSuffix = try c.decodeIfPresent(String.self, forKey: .fileSuffix) ?? fileSuffix
+        namePattern = try c.decodeIfPresent(String.self, forKey: .namePattern) ?? namePattern
         useTargetSize = try c.decodeIfPresent(Bool.self, forKey: .useTargetSize) ?? useTargetSize
         targetKB = try c.decodeIfPresent(Int.self, forKey: .targetKB) ?? targetKB
         optimizePNG = try c.decodeIfPresent(Bool.self, forKey: .optimizePNG) ?? optimizePNG
@@ -139,9 +148,23 @@ public struct Options: Sendable, Codable {
         crop = try c.decodeIfPresent(CropAspect.self, forKey: .crop) ?? crop
         scaleSet = try c.decodeIfPresent(Bool.self, forKey: .scaleSet) ?? scaleSet
         pdfDPI = try c.decodeIfPresent(Int.self, forKey: .pdfDPI) ?? pdfDPI
+        keepHDR = try c.decodeIfPresent(Bool.self, forKey: .keepHDR) ?? keepHDR
+        convertToSRGB = try c.decodeIfPresent(Bool.self, forKey: .convertToSRGB) ?? convertToSRGB
+        removeLocationOnly = try c.decodeIfPresent(Bool.self, forKey: .removeLocationOnly) ?? removeLocationOnly
     }
     /// Choices that only make sense for the images they were made for; a new session starts without them.
-    public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false; rotation = 0; flipHorizontal = false; flipVertical = false }
+    public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false; rotation = 0; flipHorizontal = false; flipVertical = false; removeLocationOnly = false }
+    /// The output name for `name` (the original's name, with any page or frame suffix) under `namePattern`.
+    public func outputStem(_ name: String) -> String {
+        let digits = max(2, String(sequenceCount).count)
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"
+        let stem = namePattern.replacingOccurrences(of: "{name}", with: name)
+            .replacingOccurrences(of: "{n}", with: String(format: "%0\(digits)d", sequence))
+            .replacingOccurrences(of: "{date}", with: formatter.string(from: Date()))
+            .filter { !"/:\\".contains($0) }.trimmingCharacters(in: .whitespaces)
+        // An empty or hidden name would be invisible in Finder.
+        return stem.isEmpty ? name : stem.hasPrefix(".") ? name + stem : stem
+    }
     /// Rotation, flips and crop, if any; empty when the image keeps its shape.
     public var shapeSummary: [String] {
         var parts: [String] = []
@@ -219,6 +242,8 @@ public struct ImageInfo: Sendable {
     public let type: String
     public let frames: Int
     public let rows: [MetadataRow]
+    /// A gain-map photo or a PQ/HLG image.
+    public var isHDR = false
     public func value(_ suffix: String) -> String? { rows.first { $0.name == suffix }?.value }
     public var camera: String? { [value("Make"), value("Model")].compactMap { $0 }.joined(separator: " ").nilIfEmpty }
     public var hasGPS: Bool { rows.contains { $0.name.hasPrefix("GPS") } }
