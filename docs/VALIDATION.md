@@ -1,3 +1,15 @@
+# v0.2.1 compression — 2026-10-16
+
+All 35 standalone checks pass, three of them new. Target file size: a 800 × 600 noise image fits 150 KB at full size; at 12 KB the image shrinks until it fits; with about 50 KB of kept XMP the result still fits; PNG output ignores the target with a note. PNG optimisation with the bundled oxipng 10.2.1 is smaller with identical decoded pixels. Keep the original when it's smaller: a quality-30% JPEG re-encoded at 100% keeps the original's bytes, with GPS and Artist removed when metadata removal is on; the setting off, or another format, keeps the re-encoded file. Each new check was confirmed to fail with its feature disabled.
+
+The metadata-retry check first passed with the retry disabled. That exposed a bug: `Engine.fileSize` read URL resource values, which are cached, so a rewritten file reported its old size. It now reads the size from disk.
+
+`Engine.swift` is split into `Types.swift` (formats and options), `Engine.swift` (inspection, conversion, saving) and `Encoders.swift` (flattening, encoders, optimisation).
+
+Native review of Dice Dev: the Quality label is a menu that switches the same row to a target size in KB; PNG input hides Quality and shows Optimise PNG. Not checked visually: the "Keep the original when it's smaller" switch in App settings, which is further down the scrolling settings view.
+
+---
+
 # v0.2.0 Aurora style — 2026-10-16
 
 Visual change only; no processing code changed and all 32 checks still pass. Orange is gone: `DiceStyle` defines the Aurora palette (mint `#34E5B8`, cyan `#2BC4F2`, indigo `#5E6BFF`, violet `#A65CFF`). Indigo is the single accent, also used for the Start play glyph; gradients are used only for the drop glow, the progress ring, the empty-state die and the app icon.

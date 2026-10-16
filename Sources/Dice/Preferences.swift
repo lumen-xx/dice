@@ -30,6 +30,7 @@ struct AppPreferences: Codable, Equatable {
     var menuBarDrop = true
     var dropStartsImmediately = false
     var dragTarget: DragTarget = .off
+    var keepSmallerOriginal = true
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -58,6 +59,7 @@ struct AppPreferences: Codable, Equatable {
         menuBarDrop = try c.decodeIfPresent(Bool.self, forKey: .menuBarDrop) ?? d.menuBarDrop
         dropStartsImmediately = try c.decodeIfPresent(Bool.self, forKey: .dropStartsImmediately) ?? d.dropStartsImmediately
         dragTarget = (try? c.decodeIfPresent(DragTarget.self, forKey: .dragTarget)) ?? d.dragTarget
+        keepSmallerOriginal = try c.decodeIfPresent(Bool.self, forKey: .keepSmallerOriginal) ?? d.keepSmallerOriginal
     }
 }
 

@@ -480,6 +480,61 @@ final class EngineTests {
         let props = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithURL(output.url as CFURL, nil)!, 0, nil) as! [String: Any]
         XCTAssertEqual(props[kCGImagePropertyProfileName as String] as? String, "Display P3")
     }
+    func pixels(_ url: URL) -> [UInt8] {
+        let image = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithURL(url as CFURL, nil)!, 0, nil)!
+        let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return Array(UnsafeBufferPointer(start: ctx.data!.assumingMemoryBound(to: UInt8.self), count: image.width * image.height * 4))
+    }
+    func testTargetFileSize() throws {
+        let input = try fixture(width: 800, height: 600, format: UTType.png.identifier)
+        var options = Options(); options.format = .jpeg; options.useTargetSize = true; options.targetKB = 150
+        let fitted = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertTrue(fitted.bytes <= 150_000); XCTAssertTrue(fitted.bytes > 75_000)
+        XCTAssertEqual(dimensions(fitted.url).0, 800); XCTAssertTrue(fitted.note?.contains("Fits 150 KB at quality") == true)
+        // Too small for any quality at full size: the image shrinks until it fits.
+        options.targetKB = 12
+        let shrunk = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertTrue(shrunk.bytes <= 12_000); XCTAssertLessThan(dimensions(shrunk.url).0, 800)
+        XCTAssertTrue(shrunk.note?.contains("reduced to") == true)
+        // Kept metadata still fits inside the budget.
+        _ = try runExif(["-overwrite_original", "-XMP-dc:Description=" + String(repeating: "metadata ", count: 5500), input.path])
+        options.targetKB = 150; options.stripMetadata = false
+        let withTags = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertTrue(withTags.bytes <= 150_000)
+        XCTAssertTrue(try Engine.inspect(withTags.url).value("Description")?.hasPrefix("metadata") == true)
+        // Lossless outputs ignore the target, and say so.
+        options.format = .png; options.stripMetadata = true
+        XCTAssertTrue(try Engine.convert(input, options: options, directory: directory).note?.contains("target size wasn't applied") == true)
+    }
+    func testPNGOptimisationIsLossless() throws {
+        let input = directory.appendingPathComponent("flat.png")
+        write([image(400)], to: input, type: .png)
+        var options = Options(); options.format = .png; options.optimizePNG = false; options.keepSmallerOriginal = false
+        let plain = try Engine.convert(input, options: options, directory: directory)
+        options.optimizePNG = true
+        let optimised = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertLessThan(optimised.bytes, plain.bytes)
+        XCTAssertTrue(pixels(optimised.url) == pixels(plain.url))
+    }
+    func testKeepSmallerOriginal() throws {
+        let input = try fixture(width: 300, height: 200)
+        let small = try Engine.convert(input, options: { var o = Options(); o.format = .jpeg; o.quality = 0.3; return o }(), directory: directory)
+        _ = try runExif(["-overwrite_original", "-GPSLatitude=52.5", "-GPSLatitudeRef=N", "-Artist=Kept", small.url.path])
+        var options = Options(); options.quality = 1; options.stripMetadata = false
+        let kept = try Engine.convert(small.url, options: options, directory: directory)
+        XCTAssertEqual(try Data(contentsOf: kept.url), try Data(contentsOf: small.url))
+        XCTAssertTrue(kept.note?.hasPrefix("Kept the original's pixels") == true)
+        options.stripMetadata = true
+        let stripped = try Engine.convert(small.url, options: options, directory: directory)
+        XCTAssertFalse(try Engine.inspect(stripped.url).hasGPS); XCTAssertNil(try Engine.inspect(stripped.url).value("Artist"))
+        XCTAssertTrue(stripped.bytes < kept.bytes + 100)
+        // A different format, or the setting off, keeps the re-encoded file.
+        options.keepSmallerOriginal = false
+        XCTAssertTrue(try Engine.convert(small.url, options: options, directory: directory).bytes > small.bytes)
+        options.keepSmallerOriginal = true; options.format = .png
+        XCTAssertEqual(try Engine.convert(small.url, options: options, directory: directory).url.pathExtension, "png")
+    }
 }
 
 @main struct Checks {
@@ -517,7 +572,10 @@ final class EngineTests {
             ("pages reuse file metadata", suite.testPagesReuseFileMetadata),
             ("folders expand to images", suite.testFoldersExpandToImages),
             ("bundled tool timeout", suite.testToolTimeout),
-            ("flattening keeps wide-gamut colour", suite.testFlattenKeepsWideGamut)
+            ("flattening keeps wide-gamut colour", suite.testFlattenKeepsWideGamut),
+            ("target file size", suite.testTargetFileSize),
+            ("lossless PNG optimisation", suite.testPNGOptimisationIsLossless),
+            ("keep the original when it's smaller", suite.testKeepSmallerOriginal)
         ]
         for (name, check) in checks {
             let before = failures

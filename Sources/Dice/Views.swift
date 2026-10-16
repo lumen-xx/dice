@@ -250,6 +250,7 @@ struct DiceView: View {
             Picker("Animated to other formats", selection: $model.preferences.framesAsFolder) {
                 Text("Folder of frames").tag(true); Text("First frame only").tag(false)
             }.tint(.primary)
+            HStack(spacing: 6) { Toggle("Keep the original when it's smaller", isOn: $model.preferences.keepSmallerOriginal); InfoTip("If re-encoding in the same format and size makes a file larger, Dice keeps the original's pixels instead. Personal metadata is still removed when that's on."); Spacer(minLength: 0) }
             HStack { Text("Filename suffix"); TextField("none", text: $model.preferences.fileSuffix).textFieldStyle(.roundedBorder).frame(width: 110); Spacer(minLength: 0) }
             Toggle("Close Dice when finished", isOn: $model.preferences.closeWhenDone)
             Divider().padding(.vertical, 4)
@@ -295,7 +296,8 @@ struct DiceView: View {
                 if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
                 if model.options.resize == .fit { HStack { number($model.options.width); Text("×"); number($model.options.height); Text("px") } }
                 if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
-                if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { HStack { Text("Quality"); Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() } }
+                if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { compressionRow }
+                if writesPNG { HStack(spacing: 6) { Toggle("Optimise PNG", isOn: $model.options.optimizePNG); InfoTip("Recompresses PNG files losslessly with oxipng: smaller files, identical pixels."); Spacer(minLength: 0) } }
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
             }
             if !model.preferences.alwaysStripMetadata { Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly) }
@@ -304,9 +306,23 @@ struct DiceView: View {
         }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 360).tint(accent)
             .disabled(model.busy || model.importing)
     }
+    /// One row: the label is a menu switching between a quality slider and a target file size.
+    var compressionRow: some View {
+        HStack {
+            Menu { Button("Quality") { model.options.useTargetSize = false }; Button("Target size") { model.options.useTargetSize = true } }
+                label: { Text(model.options.useTargetSize ? "Target size" : "Quality") }
+                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Choose a quality, or a file size to fit")
+            if model.options.useTargetSize {
+                number($model.options.targetKB, label: "Target size in kilobytes"); Text("KB")
+                InfoTip("Dice picks the highest quality that fits, and makes the image smaller only if even the lowest quality doesn't. 1 KB is 1000 bytes.")
+                Spacer(minLength: 0)
+            } else { Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() }
+        }
+    }
+    var writesPNG: Bool { model.items.contains { model.options.format == .png || (model.options.format == .original && OutputFormat.matching(inputType: $0.info?.type ?? "").format == .png) } }
     /// "Same as original" only shows Quality when some image in the batch is written in a lossy format.
     var usesQuality: Bool { model.items.contains { model.options.format.usesQuality(forInputType: $0.info?.type ?? "") } }
-    func number(_ binding: Binding<Int>) -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel("Resize value") }
+    func number(_ binding: Binding<Int>, label: String = "Resize value") -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel(label) }
     func loadPreview() async {
         guard let item = model.selection, let url = displayedURL else { preview = nil; inspected = nil; previewError = nil; return }
         let id = item.id

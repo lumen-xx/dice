@@ -12,6 +12,9 @@ def prepare_tools(destination):
     renderer = BUILD / 'vendor/resvg/bin/resvg'
     if not renderer.exists() or call(str(renderer), '--version') != '0.48.1':
         raise SystemExit('Build the pinned SVG renderer: cargo install resvg --version 0.48.1 --locked --root build/vendor/resvg')
+    optimizer = BUILD / 'vendor/oxipng/bin/oxipng'
+    if not optimizer.exists() or call(str(optimizer), '--version') != 'oxipng 10.2.1':
+        raise SystemExit('Build the pinned PNG optimizer: cargo install oxipng --version 10.2.1 --locked --root build/vendor/oxipng')
     exifprefix = pathlib.Path(call('brew', '--prefix', 'exiftool'))
     webpprefix = pathlib.Path(call('brew', '--prefix', 'webp'))
     webpversion = call(str(webpprefix / 'bin/cwebp'), '-version')
@@ -21,6 +24,8 @@ def prepare_tools(destination):
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copy2(renderer, destination / 'resvg')
     run('codesign', '--force', '--sign', '-', str(destination / 'resvg'))
+    shutil.copy2(optimizer, destination / 'oxipng')
+    run('codesign', '--force', '--sign', '-', str(destination / 'oxipng'))
     exif = destination / 'exiftool'; exif.mkdir(exist_ok=True)
     script = (exifprefix / 'bin/exiftool').read_text()
     script = '\n'.join(line for line in script.split('\n') if not (line.startswith('unshift @INC,') and '/opt/homebrew/' in line))
@@ -58,7 +63,7 @@ def prepare_tools(destination):
     binary.chmod(0o755); bundle(binary)
     for file in list(dylibs.glob('*.dylib')) + [binary]: run('codesign', '--force', '--sign', '-', str(file))
     shutil.copytree(ROOT / 'vendor/licenses', destination / 'Licenses', dirs_exist_ok=True)
-    (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\n' + call(str(binary), '-version') + '\n')
+    (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\noxipng 10.2.1\n' + call(str(binary), '-version') + '\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

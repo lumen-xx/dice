@@ -172,6 +172,7 @@ struct ImageItem: Identifiable {
         snapshot.flattenColor = preferences.flattenColor
         snapshot.keepAnimation = preferences.keepAnimation
         snapshot.framesAsFolder = preferences.framesAsFolder
+        snapshot.keepSmallerOriginal = preferences.keepSmallerOriginal
         let suffix = preferences.fileSuffix.filter { !"/:\\".contains($0) }
         snapshot.fileSuffix = suffix
         let resizeOnly = snapshot.resizeOnly && snapshot.resize != .original && !snapshot.metadataOnly && !preferences.alwaysStripMetadata

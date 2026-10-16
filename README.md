@@ -24,6 +24,7 @@ Needs Swift 5.9+, Python 3, Cargo, and Homebrew `exiftool` 13.50 and `webp` 1.6.
 
 ```sh
 cargo install resvg --version 0.48.1 --locked --root build/vendor/resvg
+cargo install oxipng --version 10.2.1 --locked --root build/vendor/oxipng
 python3 scripts/package.py --dev   # Dice Dev.app: no Finder service, safe for testing
 python3 scripts/package.py         # release app + ZIP in build/
 ```
@@ -34,4 +35,4 @@ More: [style guide](docs/STYLE_GUIDE.md) · [validation](docs/VALIDATION.md) · 
 
 ## License
 
-[MIT](LICENSE). Dice bundles ExifTool, cwebp, resvg and Sparkle under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Dice bundles ExifTool, cwebp, resvg, oxipng and Sparkle under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

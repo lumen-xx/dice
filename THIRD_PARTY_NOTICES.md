@@ -9,3 +9,5 @@ Apple frameworks and the system Perl runtime are provided by macOS, rather than 
 Dice bundles Sparkle 2.10.0 for signed software updates, under its MIT license and included third-party notices. Source: https://github.com/sparkle-project/Sparkle. The complete license is shipped as `Contents/Resources/Sparkle-LICENSE.txt`.
 
 Dice bundles the resvg 0.48.1 static SVG renderer (Apache-2.0 OR MIT), built from the pinned crates.io release using its lockfile. Source: https://github.com/linebender/resvg/tree/v0.48.1. License texts and dependency notices are included in `Tools/Licenses/resvg`. Dice uses unmodified upstream code; no renderer source modifications are distributed.
+
+Dice bundles the oxipng 10.2.1 lossless PNG optimizer (MIT), built from the pinned crates.io release using its lockfile. Source: https://github.com/oxipng/oxipng/tree/v10.2.1. License texts for oxipng and its 47 dependencies (MIT, Apache-2.0, BSD, Zlib and Unlicense terms) are included in `Tools/Licenses/oxipng`, listed in `DEPENDENCIES.txt`. Dice uses unmodified upstream code.
