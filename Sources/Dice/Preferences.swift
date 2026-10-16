@@ -32,6 +32,8 @@ struct AppPreferences: Codable, Equatable {
     var dropStartsImmediately = false
     var dragTarget: DragTarget = .off
     var keepSmallerOriginal = true
+    /// Opaque photos fill the window edge to edge; transparent images, SVGs and PDFs keep their margins.
+    var fitToWindow = false
     init() {}
     private enum LegacyKeys: String, CodingKey { case fileSuffix }
     init(from decoder: Decoder) throws {
@@ -49,6 +51,7 @@ struct AppPreferences: Codable, Equatable {
         startAtLogin = try c.decodeIfPresent(Bool.self, forKey: .startAtLogin) ?? d.startAtLogin
         showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
         stayOnTop = try c.decodeIfPresent(Bool.self, forKey: .stayOnTop) ?? d.stayOnTop
+        fitToWindow = try c.decodeIfPresent(Bool.self, forKey: .fitToWindow) ?? d.fitToWindow
         defaultReplaceOriginals = try c.decodeIfPresent(Bool.self, forKey: .defaultReplaceOriginals) ?? d.defaultReplaceOriginals
         defaultStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .defaultStripMetadata) ?? d.defaultStripMetadata
         alwaysStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .alwaysStripMetadata) ?? d.alwaysStripMetadata

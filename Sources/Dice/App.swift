@@ -170,9 +170,23 @@ final class DiceWindow: NSWindow {
         }
         openImages(urls)
     }
+    /// macOS delivers a mixed Finder selection (say photos and an SVG) as several open events, one per type,
+    /// moments apart. Events within a quarter of a second are gathered into one selection, so a later event doesn't
+    /// replace the files an earlier one brought.
+    private var pendingOpen: [URL] = []
+    private var pendingOpenFlush: DispatchWorkItem?
     func openImages(_ urls: [URL]) {
-        guard !model.busy && !model.importing else { showWindow(); model.alert = "Finish the current images before opening another selection."; return }
-        model.clear(); showWindow(); model.add(urls)
+        guard pendingOpenFlush != nil || !(model.busy || model.importing) else { showWindow(); model.alert = "Finish the current images before opening another selection."; return }
+        pendingOpen += urls
+        pendingOpenFlush?.cancel()
+        let flush = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let urls = self.pendingOpen; self.pendingOpen = []; self.pendingOpenFlush = nil
+            guard !self.model.busy && !self.model.importing else { self.showWindow(); self.model.alert = "Finish the current images before opening another selection."; return }
+            self.model.clear(); self.showWindow(); self.model.add(urls)
+        }
+        pendingOpenFlush = flush
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: flush)
     }
     func windowWillClose(_ notification: Notification) { window = nil; model.settingsPresented = false; model.closeSession(); NSApp.setActivationPolicy(.accessory) }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

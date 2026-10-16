@@ -12,7 +12,6 @@ struct DiceView: View {
     @State private var imageSettingsPresented = false
     @State private var exportPopoverPresented = false
     @State private var finderMenu = FinderMenu.isEnabled
-    @AppStorage("adjustExpanded") private var adjustExpanded = false
     // `--show metadata` or `--show batch` opens that pane, for screenshots; normal launches start on the image.
     @State private var metadata = DiceView.launchPane == "metadata"
     @State private var batch = DiceView.launchPane == "batch"
@@ -32,6 +31,13 @@ struct DiceView: View {
         if let image = model.previewCache.image(for: key) { return NSImage(cgImage: image, size: .zero) }
         return model.selection?.thumbnail
     }
+    /// With "Fit photos to the window", an opaque photo fills the window behind the controls. Transparent images
+    /// and documents (SVG, PDF, Illustrator) keep the inset layout.
+    var fillsWindow: Bool {
+        guard model.preferences.fitToWindow, !model.busy, let item = model.selection, let key = previewKey, let preview = displayedPreview else { return false }
+        if DocumentImage.isDocument(item.url) || displayedURL.map(DocumentImage.isDocument) == true { return false }
+        return PreviewFill.isOpaque(preview, key: key)
+    }
     var currentInfo: ImageInfo? {
         let known = model.selection?.result == nil ? model.selection?.info : model.selection?.resultInfo
         return known ?? (previewKey == loadedPreviewKey ? inspected : nil)
@@ -39,7 +45,7 @@ struct DiceView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             if model.settingsPresented {
-                ScrollView { appSettingsPanel.frame(maxWidth: .infinity) }
+                ScrollView { appSettingsPanel.frame(maxWidth: .infinity) }.scrollIndicators(.never)
                     .padding(.top, 64).padding(.bottom, 16)
             } else if batch {
                 BatchPane(model: model, query: $batchSearch) { id in model.selected = id; batch = false }
@@ -61,8 +67,13 @@ struct DiceView: View {
                             Text(model.status).font(DiceStyle.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if let preview = displayedPreview {
-                        Image(nsImage: preview).resizable().scaledToFit().padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
-                            .contextMenu { if let id = model.selected { removalMenu(id) } }
+                        if fillsWindow {
+                            Color.clear.overlay { Image(nsImage: preview).resizable().scaledToFill() }.clipped()
+                                .contextMenu { if let id = model.selected { removalMenu(id) } }
+                        } else {
+                            Image(nsImage: preview).resizable().scaledToFit().padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
+                                .contextMenu { if let id = model.selected { removalMenu(id) } }
+                        }
                     } else if let error = previewError {
                         Text(error).font(DiceStyle.caption).foregroundStyle(.secondary).padding(30)
                     } else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -70,7 +81,7 @@ struct DiceView: View {
             }
             toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch || model.settingsPresented ? 56 : 0)
             if !model.items.isEmpty && !model.settingsPresented {
-                VStack { Spacer(); HStack(spacing: 12) { footerSummary; Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
+                VStack { Spacer(); HStack(spacing: 12) { footerSummary.modifier(OverPhoto(active: fillsWindow && !metadata && !batch)); Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
             }
         }
         .font(DiceStyle.body)
@@ -218,119 +229,244 @@ struct DiceView: View {
                 set: { if let c = NSColor($0).usingColorSpace(.sRGB) { model.preferences.flattenColor = [Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent)] } })
     }
     var appSettingsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Export defaults").font(DiceStyle.heading)
-            Picker("When finished", selection: $model.preferences.exportMode) { ForEach(ExportMode.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
-            Toggle("Default export folder", isOn: $model.preferences.useExportFolder).disabled(model.preferences.exportMode == .clipboard)
-            HStack {
-                Text(model.preferences.exportFolder.isEmpty ? "Beside originals" : model.preferences.exportFolder).font(DiceStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                Spacer()
-                Button("Choose…") { model.chooseExportFolder() }.disabled(!model.preferences.useExportFolder)
-            }
-            Toggle("Default export format", isOn: $model.preferences.useExportFormat)
-            Picker("Default format", selection: $model.preferences.exportFormat) {
-                ForEach(OutputFormat.allCases.filter { $0 != .original }) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) }
-            }.tint(.primary).disabled(!model.preferences.useExportFormat)
-            Picker("Default resize", selection: $model.preferences.defaultResize) { ForEach([ResizeMode.original, .edge, .percent]) { Text($0.rawValue).tag($0) } }.tint(.primary)
-            if model.preferences.defaultResize == .edge { HStack { Text("Longest edge"); number($model.preferences.defaultEdge); Text("px") } }
-            if model.preferences.defaultResize == .percent { HStack { Text("Scale"); number($model.preferences.defaultPercent); Text("%") } }
-            HStack { Text("Default quality"); Slider(value: $model.preferences.defaultQuality, in: 0.1...1); Text("\(Int(model.preferences.defaultQuality * 100))%").monospacedDigit() }
-            Toggle("Remove metadata by default", isOn: $model.preferences.defaultStripMetadata).disabled(model.preferences.alwaysStripMetadata)
-            HStack(spacing: 6) { Toggle("Always remove metadata", isOn: $model.preferences.alwaysStripMetadata); InfoTip("Removes all metadata (except the colour profile) from every export and hides the option in image settings"); Spacer(minLength: 0) }
-            HStack(spacing: 6) { Toggle("Replace originals by default", isOn: $model.preferences.defaultReplaceOriginals); InfoTip("Original goes to the Trash; PDFs, SVGs and multi-frame files are always saved as copies"); Spacer(minLength: 0) }
-            Text("Defaults apply to newly opened images.").font(DiceStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Divider().padding(.vertical, 4)
-            Text("Output").font(DiceStyle.heading)
-            HStack(spacing: 6) {
-                ColorPicker("Fill transparency with", selection: flattenColor, supportsOpacity: false)
-                InfoTip("Used when an image with transparency is saved as JPEG or BMP, which have no alpha channel.")
-                Text(Engine.hex(model.preferences.flattenColor)).font(DiceStyle.caption).foregroundStyle(.secondary).monospacedDigit()
-                Spacer(minLength: 0)
-            }
-            HStack(spacing: 6) { Toggle("Keep animations", isOn: $model.preferences.keepAnimation); InfoTip("Animated images stay animated when saved as GIF, PNG (APNG), WebP or HEIC. Other formats get a folder of frames or the first frame."); Spacer(minLength: 0) }
-            Picker("Animated to other formats", selection: $model.preferences.framesAsFolder) {
-                Text("Folder of frames").tag(true); Text("First frame only").tag(false)
-            }.tint(.primary)
-            HStack(spacing: 6) { Toggle("Keep the original when it's smaller", isOn: $model.preferences.keepSmallerOriginal); InfoTip("If re-encoding in the same format and size makes a file larger, Dice keeps the original's pixels instead. Personal metadata is still removed when that's on."); Spacer(minLength: 0) }
-            HStack(spacing: 6) { Text("File name"); TextField("{name}-dice", text: $model.preferences.namePattern).textFieldStyle(.roundedBorder).frame(width: 150); InfoTip("{name} is the original name, {n} the image's number in the batch (01, 02…), {date} today's date. Replace originals keeps the original name."); Spacer(minLength: 0) }
-            Toggle("Close Dice when finished", isOn: $model.preferences.closeWhenDone)
-            Divider().padding(.vertical, 4)
-            Text("General").font(DiceStyle.heading)
-            Toggle("Start at login", isOn: $model.preferences.startAtLogin)
-            Toggle("Show in menu bar", isOn: $model.preferences.showInMenuBar)
-            if model.preferences.showInMenuBar { Toggle("Drop images on the menu bar icon", isOn: $model.preferences.menuBarDrop).padding(.leading, 20) }
-            Picker("Drag files to reveal a drop target", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
-            if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off { Toggle("Start right after a drop", isOn: $model.preferences.dropStartsImmediately) }
-            Toggle("Stay on top of other apps", isOn: $model.preferences.stayOnTop)
-            if FinderMenu.isAvailable {
-                HStack(spacing: 6) {
-                    Toggle("Show “Edit with Dice” in Finder's right-click menu", isOn: Binding(get: { finderMenu }, set: { finderMenu = $0; FinderMenu.setEnabled($0) }))
-                    InfoTip("Adds or removes the item for images and PDFs. Finder may take a moment to update.")
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 24) {
+            SettingSection("New images") {
+                SettingRow("Format") {
+                    ValueMenu(label: "Default format", value: defaultFormat.wrappedValue == .original ? "Same as original" : defaultFormat.wrappedValue.rawValue) {
+                        Picker("Default format", selection: defaultFormat) {
+                            Text(OutputFormat.original.rawValue).tag(OutputFormat.original)
+                            Divider()
+                            ForEach(Self.formatOrder, id: \.self) { f in Text(f.rawValue).tag(f).disabled(!Engine.canEncode(f)) }
+                        }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+                SettingRow("Quality") {
+                    Slider(value: $model.preferences.defaultQuality, in: 0.1...1).controlSize(.mini).frame(width: 140).accessibilityLabel("Default quality")
+                    Text("\(Int(model.preferences.defaultQuality * 100))%").font(Rows.value.monospacedDigit()).frame(width: 36, alignment: .trailing)
+                }
+                SettingRow("Size") {
+                    if model.preferences.defaultResize == .edge { NumberValue(value: $model.preferences.defaultEdge, label: "Longest edge", unit: "px") }
+                    if model.preferences.defaultResize == .percent { NumberValue(value: $model.preferences.defaultPercent, label: "Scale", unit: "%") }
+                    ValueMenu(label: "Default size", value: Self.shortName(model.preferences.defaultResize)) {
+                        Picker("Default size", selection: $model.preferences.defaultResize) { ForEach([ResizeMode.original, .edge, .percent]) { Text($0.rawValue).tag($0) } }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+                SettingRow("Metadata", info: "Remove takes all metadata out except the colour profile, and you can still keep it per batch. Always remove does it for every export and hides the choice in Image settings.") {
+                    ValueMenu(label: "Default metadata", value: ["Keep", "Remove", "Always remove"][defaultMetadata.wrappedValue]) {
+                        Picker("Default metadata", selection: defaultMetadata) { Text("Keep").tag(0); Text("Remove").tag(1); Divider(); Text("Always remove").tag(2) }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+                SettingRow("Replace originals", info: "Originals go to the Trash and the result takes their name. PDFs, SVGs and multi-frame files are always saved as copies.") {
+                    RowSwitch(label: "Replace originals by default", isOn: $model.preferences.defaultReplaceOriginals)
                 }
             }
-            Divider().padding(.vertical, 4)
-            Text("Updates").font(DiceStyle.heading)
-            Toggle("Automatically check for updates", isOn: $model.preferences.automaticallyCheckUpdates)
-            Button("Check for updates…") { checkUpdates() }
-            Divider().padding(.vertical, 4)
+            SettingSection("Saving") {
+                SettingRow("When finished") {
+                    ValueMenu(label: "When finished", value: model.preferences.exportMode.rawValue) {
+                        Picker("When finished", selection: $model.preferences.exportMode) { ForEach(ExportMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+                if model.preferences.exportMode == .save {
+                    SettingRow("Save to") {
+                        ValueMenu(label: "Save to", value: model.preferences.useExportFolder && !model.preferences.exportFolder.isEmpty ? URL(fileURLWithPath: model.preferences.exportFolder).lastPathComponent : "Beside originals") {
+                            Picker("Save to", selection: $model.preferences.useExportFolder) {
+                                Text("Beside originals").tag(false)
+                                if !model.preferences.exportFolder.isEmpty { Text(URL(fileURLWithPath: model.preferences.exportFolder).lastPathComponent).tag(true) }
+                            }.pickerStyle(.inline).labelsHidden()
+                            Divider()
+                            Button("Choose folder…") { model.chooseExportFolder() }
+                        }.help(model.preferences.useExportFolder ? model.preferences.exportFolder : "Each result is saved in its original's folder")
+                    }
+                    SettingRow("File name", info: "{name} is the original name, {n} the image's number in the batch (01, 02…), {date} today's date. Replace originals keeps the original name.") {
+                        TextField("{name}-dice", text: $model.preferences.namePattern).textFieldStyle(.plain).font(Rows.value).multilineTextAlignment(.trailing)
+                            .frame(width: 130).padding(.horizontal, 6).frame(height: 22)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.06)))
+                            .accessibilityLabel("File name")
+                    }
+                }
+                SettingRow("Close Dice when finished") { RowSwitch(label: "Close Dice when finished", isOn: $model.preferences.closeWhenDone) }
+            }
+            SettingSection("Conversion") {
+                SettingRow("Keep animations", info: "Animated images stay animated when saved as GIF, PNG (APNG), WebP or HEIC.") {
+                    RowSwitch(label: "Keep animations", isOn: $model.preferences.keepAnimation)
+                }
+                SettingRow("Animations in other formats") {
+                    ValueMenu(label: "Animations in other formats", value: model.preferences.framesAsFolder ? "Folder of frames" : "First frame") {
+                        Picker("Animations in other formats", selection: $model.preferences.framesAsFolder) { Text("Folder of frames").tag(true); Text("First frame only").tag(false) }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+                SettingRow("JPEG background", info: "JPEG and BMP have no transparency, so transparent areas are filled with this colour.") {
+                    Text(Engine.hex(model.preferences.flattenColor)).font(Rows.value.monospacedDigit()).foregroundStyle(.secondary)
+                    ColorPicker("JPEG background colour", selection: flattenColor, supportsOpacity: false).labelsHidden().controlSize(.mini)
+                }
+                SettingRow("Keep the original when it's smaller", info: "If re-encoding in the same format and size makes a file larger, Dice keeps the original's pixels instead. Metadata is still removed when that's on.") {
+                    RowSwitch(label: "Keep the original when it's smaller", isOn: $model.preferences.keepSmallerOriginal)
+                }
+            }
+            SettingSection("Window") {
+                SettingRow("Fit photos to the window", info: "Photos fill the whole window, edge to edge, behind the controls; edges that don't fit are hidden in the preview only. Transparent images, SVGs and PDFs keep their margins.") {
+                    RowSwitch(label: "Fit photos to the window", isOn: $model.preferences.fitToWindow)
+                }
+                SettingRow("Stay on top of other apps") { RowSwitch(label: "Stay on top of other apps", isOn: $model.preferences.stayOnTop) }
+            }
+            SettingSection("System") {
+                SettingRow("Start at login") { RowSwitch(label: "Start at login", isOn: $model.preferences.startAtLogin) }
+                SettingRow("Show in menu bar") { RowSwitch(label: "Show in menu bar", isOn: $model.preferences.showInMenuBar) }
+                if model.preferences.showInMenuBar {
+                    SettingRow("Drop images on the menu bar icon") { RowSwitch(label: "Drop images on the menu bar icon", isOn: $model.preferences.menuBarDrop) }.padding(.leading, 14)
+                }
+                SettingRow("Drop target while dragging", info: "Dragging files anywhere reveals a small drop target in this screen corner.") {
+                    ValueMenu(label: "Drop target while dragging", value: model.preferences.dragTarget.rawValue) {
+                        Picker("Drop target while dragging", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+                if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off {
+                    SettingRow("Start right after a drop") { RowSwitch(label: "Start right after a drop", isOn: $model.preferences.dropStartsImmediately) }
+                }
+                if FinderMenu.isAvailable {
+                    SettingRow("“Edit with Dice” in Finder", info: "Adds or removes the item in Finder's right-click menu for images and PDFs. Finder may take a moment to update.") {
+                        RowSwitch(label: "Edit with Dice in Finder", isOn: Binding(get: { finderMenu }, set: { finderMenu = $0; FinderMenu.setEnabled($0) }))
+                    }
+                }
+            }
+            SettingSection("Updates") {
+                SettingRow("Check automatically") { RowSwitch(label: "Check for updates automatically", isOn: $model.preferences.automaticallyCheckUpdates) }
+                SettingRow("Check now") { Button("Check for updates…") { checkUpdates() }.buttonStyle(.plain).font(Rows.value) }
+            }
             VStack(alignment: .leading, spacing: 2) {
                 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
                 let year = Calendar.current.component(.year, from: Date())
-                Text("Dice \(version)")
-                Text("© \(String(year)) opyuii · open source under the MIT License")
+                Text("Dice \(version) · © \(String(year)) opyuii · MIT License")
                 HStack(spacing: 10) {
                     Link("GitHub", destination: URL(string: "https://github.com/lumen-xx/dice")!)
                     Link("opyuii.com", destination: URL(string: "https://opyuii.com")!)
                 }
-            }.font(DiceStyle.caption).foregroundStyle(.secondary)
-        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 380).tint(accent)
+            }.font(DiceStyle.caption).foregroundStyle(.tertiary).tint(.secondary)
+        }.padding(DiceStyle.inset).frame(width: 380).tint(.primary)
+    }
+    static func shortName(_ mode: ResizeMode) -> String {
+        switch mode { case .original: "Original"; case .edge: "Longest edge"; case .percent: "Scale"; case .fit: "Fit"; case .width: "Width"; case .height: "Height"; case .fill: "Fill" }
+    }
+    /// "Same as original" turns the default format off; any other choice turns it on.
+    var defaultFormat: Binding<OutputFormat> {
+        Binding(get: { model.preferences.useExportFormat ? model.preferences.exportFormat : .original },
+                set: { if $0 == .original { model.preferences.useExportFormat = false } else { model.preferences.useExportFormat = true; model.preferences.exportFormat = $0 } })
+    }
+    /// Keep, remove by default, or always remove (which hides the choice in Image settings).
+    var defaultMetadata: Binding<Int> {
+        Binding(get: { model.preferences.alwaysStripMetadata ? 2 : model.preferences.defaultStripMetadata ? 1 : 0 },
+                set: { model.preferences.alwaysStripMetadata = $0 == 2; model.preferences.defaultStripMetadata = $0 != 0 })
     }
     var imageSettingsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Image settings").font(DiceStyle.heading)
-            Toggle("Metadata only", isOn: $model.options.metadataOnly)
-            if !model.options.metadataOnly {
-                Picker("Format", selection: $model.options.format) { ForEach(OutputFormat.allCases) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) } }.tint(.primary)
-                Picker("Resize", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
-                if model.options.resize == .edge { HStack { Text("Longest edge"); number($model.options.edge); Text("px") } }
-                if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
-                if model.options.resize == .fit || model.options.resize == .fill { HStack { number($model.options.width, label: "Width"); Text("×"); number($model.options.height, label: "Height"); Text("px") } }
-                if model.options.resize == .width { HStack { Text("Width"); number($model.options.width, label: "Width"); Text("px") } }
-                if model.options.resize == .height { HStack { Text("Height"); number($model.options.height, label: "Height"); Text("px") } }
-                adjustSection
-                if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
-                if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { compressionRow }
-                if writesPNG { HStack(spacing: 6) { Toggle("Optimise PNG", isOn: $model.options.optimizePNG); InfoTip("Recompresses PNG files losslessly with oxipng: smaller files, identical pixels."); Spacer(minLength: 0) } }
-                if model.options.format.hasLosslessMode { Toggle("Lossless", isOn: $model.options.webpLossless) }
-                if model.options.format == .pdf && model.items.count > 1 { HStack(spacing: 6) { Toggle("Combine into one PDF", isOn: $model.options.combinePDF); InfoTip("Every image becomes a page, in batch order, in a single PDF saved beside the first image."); Spacer(minLength: 0) } }
-            }
-            if !model.preferences.alwaysStripMetadata {
-                HStack(spacing: 6) {
-                    Picker("Metadata", selection: metadataChoice) {
-                        Text("Keep").tag(0).disabled(model.options.metadataOnly); Text("Remove location").tag(1); Text("Remove all").tag(2)
-                    }.tint(.primary).fixedSize()
-                    InfoTip("Remove all strips camera details, GPS, dates, captions and maker notes. Only the colour profile stays, so colours still display correctly. Remove location takes out GPS and place names and keeps the rest.")
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 4) {
+            SettingRow("Format", info: "Same as original keeps each file's format. Metadata only changes the metadata without re-encoding, so pixels stay identical. Formats Dice can't write on this Mac are greyed out.") {
+                ValueMenu(label: "Format", value: formatValue) {
+                    Picker("Format", selection: Binding(get: { model.options.metadataOnly ? nil : model.options.format }, set: { if let f = $0 { model.options.metadataOnly = false; model.options.format = f } })) {
+                        Text(OutputFormat.original.rawValue).tag(OutputFormat?.some(.original))
+                        Divider()
+                        ForEach(Self.formatOrder, id: \.self) { f in Text(f.rawValue).tag(OutputFormat?.some(f)).disabled(!Engine.canEncode(f)) }
+                    }.pickerStyle(.inline).labelsHidden()
+                    Divider()
+                    Toggle("Metadata only", isOn: $model.options.metadataOnly)
+                    if !model.options.metadataOnly {
+                        if model.options.format.hasLosslessMode { Toggle("Lossless", isOn: $model.options.webpLossless) }
+                        if writesPNG { Toggle("Optimise PNG", isOn: $model.options.optimizePNG) }
+                        if model.options.format == .pdf && model.items.count > 1 { Toggle("Combine into one PDF", isOn: $model.options.combinePDF) }
+                        Toggle("Convert to sRGB", isOn: $model.options.convertToSRGB)
+                        if batchHasHDR { Toggle("Keep HDR", isOn: $model.options.keepHDR) }
+                    }
                 }
             }
-            Divider()
-            HStack(spacing: 6) { Toggle("Replace originals", isOn: $model.options.replaceOriginals); InfoTip("Move each original to the Trash and save the result under its name. PDFs, SVGs and multi-frame files are always saved as copies."); Spacer(minLength: 0) }
-        }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 360).tint(accent)
+            if !model.options.metadataOnly {
+                if showsCompression {
+                    SettingRow(info: model.options.useTargetSize ? "Dice picks the highest quality that fits the size, and makes the image smaller only if even the lowest quality doesn't. 1 KB is 1000 bytes." : "Higher means more detail and bigger files. 80–90% is hard to tell from the original for photos.") {
+                        ValueMenu(label: "Compression", value: model.options.useTargetSize ? "Target size" : "Quality", secondary: true) {
+                            Picker("Compression", selection: $model.options.useTargetSize) { Text("Quality").tag(false); Text("Target size").tag(true) }.pickerStyle(.inline).labelsHidden()
+                        }
+                    } content: {
+                        if model.options.useTargetSize {
+                            NumberValue(value: $model.options.targetKB, label: "Target size in kilobytes", unit: "KB", width: 52)
+                        } else {
+                            Slider(value: $model.options.quality, in: 0.1...1).controlSize(.mini).frame(width: 120).accessibilityLabel("Quality")
+                            Text("\(Int(model.options.quality * 100))%").font(Rows.value.monospacedDigit()).frame(width: 36, alignment: .trailing)
+                        }
+                    }
+                }
+                SettingRow("Size", info: "Fit keeps the whole image inside the box. Fill covers the box and crops the overflow from the centre. Photos aren't enlarged unless you turn on Allow enlarging in this menu; SVGs and PDFs always render at the size you ask for.") {
+                    switch model.options.resize {
+                    case .original: EmptyView()
+                    case .edge: NumberValue(value: $model.options.edge, label: "Longest edge", unit: "px")
+                    case .percent: NumberValue(value: $model.options.percent, label: "Scale", unit: "%")
+                    case .width: NumberValue(value: $model.options.width, label: "Width", unit: "px")
+                    case .height: NumberValue(value: $model.options.height, label: "Height", unit: "px")
+                    case .fit, .fill:
+                        NumberValue(value: $model.options.width, label: "Width", width: 40)
+                        Text("×").font(Rows.value).foregroundStyle(.secondary)
+                        NumberValue(value: $model.options.height, label: "Height", width: 40)
+                    }
+                    ValueMenu(label: "Size", value: sizeValue) {
+                        Picker("Size", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.inline).labelsHidden()
+                        Divider()
+                        if model.options.resize != .original {
+                            Toggle("Allow enlarging", isOn: $model.options.upscale)
+                            if !model.preferences.alwaysStripMetadata { Toggle("Resize only (keep format and metadata)", isOn: $model.options.resizeOnly) }
+                        }
+                        Toggle("Also save @2x and @1x", isOn: $model.options.scaleSet)
+                        if model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) {
+                            Picker("PDF resolution", selection: $model.options.pdfDPI) { ForEach([72, 144, 300, 600], id: \.self) { Text("\($0) dpi").tag($0) } }
+                        }
+                    }
+                }
+                SettingRow("Rotate") {
+                    if model.options.normalizedRotation != 0 { Text("\(model.options.normalizedRotation)°").font(Rows.value.monospacedDigit()).foregroundStyle(.secondary).fixedSize() }
+                    HStack(spacing: 0) {
+                        SymbolButton(symbol: "rotate.left", label: "Rotate anticlockwise") { model.options.rotation = (model.options.normalizedRotation + 270) % 360 }
+                        SymbolButton(symbol: "rotate.right", label: "Rotate clockwise") { model.options.rotation = (model.options.normalizedRotation + 90) % 360 }
+                        SymbolButton(symbol: "arrow.left.and.right.righttriangle.left.righttriangle.right", label: "Flip horizontally", on: model.options.flipHorizontal) { model.options.flipHorizontal.toggle() }
+                        SymbolButton(symbol: "arrow.up.and.down.righttriangle.up.righttriangle.down", label: "Flip vertically", on: model.options.flipVertical) { model.options.flipVertical.toggle() }
+                    }.padding(.trailing, -5)
+                }
+                SettingRow("Crop", info: "Crops to the aspect ratio around the centre, after rotating and before resizing.") {
+                    ValueMenu(label: "Crop", value: model.options.crop == .none ? "None" : model.options.crop.rawValue) {
+                        Picker("Crop", selection: $model.options.crop) { ForEach(CropAspect.allCases) { Text($0 == .none ? "None" : $0.rawValue + " (centred)").tag($0) } }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+            }
+            SettingRow("Metadata", info: "Remove location takes out GPS and place names and keeps the rest. Remove all strips camera details, GPS, dates, captions and maker notes; only the colour profile stays, so colours still display correctly.") {
+                if model.preferences.alwaysStripMetadata {
+                    Text("Always removed").font(Rows.value).foregroundStyle(.secondary).help("Set in App settings. All metadata except the colour profile is removed.")
+                } else {
+                    ValueMenu(label: "Metadata", value: ["Keep", "Remove location", "Remove all"][metadataChoice.wrappedValue]) {
+                        Picker("Metadata", selection: metadataChoice) {
+                            Text("Keep").tag(0).disabled(model.options.metadataOnly); Text("Remove location").tag(1); Text("Remove all (keeps the colour profile)").tag(2)
+                        }.pickerStyle(.inline).labelsHidden()
+                    }
+                }
+            }
+            Divider().padding(.vertical, 6)
+            if !model.options.metadataOnly {
+                SettingRow("Remove background", info: "Best on photos with a clear subject: people, pets, products. Runs on this Mac; nothing is uploaded. Needs a format with transparency, so Same as original saves JPEG and BMP as PNG. Images without a clear subject aren't saved.", tipAbove: true) { RowSwitch(label: "Remove background", isOn: $model.options.removeBackground) }
+            }
+            SettingRow("Replace originals", info: "Moves each original to the Trash and saves the result under its name, so you can still restore it. PDFs, SVGs and multi-frame files are always saved as copies.", tipAbove: true) { RowSwitch(label: "Replace originals", isOn: $model.options.replaceOriginals) }
+        }.padding(.horizontal, 18).padding(.vertical, 14).frame(width: 300).tint(.primary)
             .disabled(model.busy || model.importing)
     }
-    /// One row: the label is a menu switching between a quality slider and a target file size.
-    var compressionRow: some View {
-        HStack {
-            Menu { Button("Quality") { model.options.useTargetSize = false }; Button("Target size") { model.options.useTargetSize = true } }
-                label: { Text(model.options.useTargetSize ? "Target size" : "Quality") }
-                .menuStyle(.borderlessButton).fixedSize().tint(.primary).help("Choose a quality, or a file size to fit")
-            if model.options.useTargetSize {
-                number($model.options.targetKB, label: "Target size in kilobytes"); Text("KB")
-                InfoTip("Dice picks the highest quality that fits, and makes the image smaller only if even the lowest quality doesn't. 1 KB is 1000 bytes.")
-                Spacer(minLength: 0)
-            } else { Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() }
-        }
+    /// Everyday formats first, then the specialised ones.
+    static let formatOrder: [OutputFormat] = [.jpeg, .png, .heic, .webp, .avif, .jxl, .gif, .tiff, .bmp, .ico, .icns, .pdf]
+    var formatValue: String {
+        let o = model.options
+        if o.metadataOnly { return "Metadata only" }
+        var parts = [o.format == .original ? "Original" : o.format.rawValue]
+        if o.format.hasLosslessMode && o.webpLossless { parts.append("Lossless") }
+        if o.convertToSRGB { parts.append("sRGB") }
+        if !o.keepHDR && batchHasHDR { parts.append("SDR") }
+        if o.format == .pdf && o.combinePDF && model.items.count > 1 { parts.append("One file") }
+        return parts.joined(separator: " · ")
+    }
+    var sizeValue: String { Self.shortName(model.options.resize) + (model.options.scaleSet ? " · @1–3x" : "") }
+    var showsCompression: Bool {
+        usesQuality && !(model.options.format.hasLosslessMode && model.options.webpLossless)
+            && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata)
     }
     /// Keep, location only (GPS and place names), or all metadata except the colour profile.
     var metadataChoice: Binding<Int> {
@@ -338,65 +474,6 @@ struct DiceView: View {
                 set: { model.options.stripMetadata = $0 != 0; model.options.removeLocationOnly = $0 == 1 })
     }
     var batchHasHDR: Bool { model.items.contains { $0.info?.isHDR == true } }
-    /// Rotation, flips, crop, background, enlarging, scale sets, PDF resolution and colour, inline. Folded, it is one
-    /// row with a summary, so the popover stays short; whether it is open is remembered.
-    var adjustSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { adjustExpanded.toggle() } } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(adjustExpanded ? 90 : 0))
-                    Text("Adjust")
-                    Spacer(minLength: 8)
-                    if !adjustExpanded { Text(shapeLabel).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel("Adjust").accessibilityValue(adjustExpanded ? "Expanded" : shapeLabel)
-                .help("Rotate, flip, crop, remove the background, enlarge, save @1x–@3x sets, or convert colours")
-            if adjustExpanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
-                        Text("Rotate")
-                        adjustButton("rotate.left", "Rotate anticlockwise") { model.options.rotation = (model.options.normalizedRotation + 270) % 360 }
-                        adjustButton("rotate.right", "Rotate clockwise") { model.options.rotation = (model.options.normalizedRotation + 90) % 360 }
-                        Text("\(model.options.normalizedRotation)°").monospacedDigit().foregroundStyle(.secondary).frame(width: 34, alignment: .leading)
-                        Text("Flip").padding(.leading, 10)
-                        adjustButton("arrow.left.and.right.righttriangle.left.righttriangle.right", "Flip horizontally", on: model.options.flipHorizontal) { model.options.flipHorizontal.toggle() }
-                        adjustButton("arrow.up.and.down.righttriangle.up.righttriangle.down", "Flip vertically", on: model.options.flipVertical) { model.options.flipVertical.toggle() }
-                    }
-                    Picker("Crop", selection: $model.options.crop) { ForEach(CropAspect.allCases) { Text($0 == .none ? "None" : $0.rawValue + " (centred)").tag($0) } }.tint(.primary).fixedSize()
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-                        GridRow { Toggle("Remove background", isOn: $model.options.removeBackground); Toggle("Allow enlarging", isOn: $model.options.upscale) }
-                        GridRow {
-                            HStack(spacing: 6) { Toggle("Save @2x and @1x", isOn: $model.options.scaleSet); InfoTip("The result is the @3x image; @2x and @1x are saved beside it in one folder.") }
-                            Toggle("Convert to sRGB", isOn: $model.options.convertToSRGB)
-                        }
-                        if batchHasHDR { GridRow { Toggle("Keep HDR", isOn: $model.options.keepHDR) } }
-                    }
-                    if model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) {
-                        Picker("PDF resolution", selection: $model.options.pdfDPI) { ForEach([72, 144, 300, 600], id: \.self) { Text("\($0) dpi").tag($0) } }.tint(.primary).fixedSize()
-                    }
-                }.padding(.leading, 16).transition(.opacity)
-            }
-        }
-    }
-    /// A small square button for the Adjust row; `on` fills it with the accent for flips that are applied.
-    func adjustButton(_ symbol: String, _ label: String, on: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).frame(width: 26, height: 22)
-                .foregroundStyle(on ? accent : .primary)
-                .background(RoundedRectangle(cornerRadius: 6).fill(on ? accent.opacity(0.22) : Color.primary.opacity(0.08)))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain).help(label).accessibilityLabel(label).accessibilityAddTraits(on ? .isSelected : [])
-    }
-    var shapeLabel: String {
-        var parts = model.options.shapeSummary
-        if model.options.upscale { parts.append("Enlarge") }
-        if model.options.scaleSet { parts.append("@1–3x") }
-        if model.options.pdfDPI != 144 && model.items.contains(where: { DocumentImage.kind($0.url) == .pdf }) { parts.append("\(model.options.pdfDPI) dpi") }
-        if model.options.convertToSRGB { parts.append("sRGB") }
-        if !model.options.keepHDR && batchHasHDR { parts.append("SDR") }
-        return parts.isEmpty ? "As is" : parts.joined(separator: ", ")
-    }
     var writesPNG: Bool { model.items.contains { model.options.format == .png || (model.options.format == .original && OutputFormat.matching(inputType: $0.info?.type ?? "").format == .png) } }
     /// "Same as original" only shows Quality when some image in the batch is written in a lossy format.
     var usesQuality: Bool { model.items.contains { model.options.format.usesQuality(forInputType: $0.info?.type ?? "") } }
@@ -544,5 +621,17 @@ struct SwipeCatcher: NSViewRepresentable {
             if !fired && abs(travelled) > 70 { fired = true; onSwipe(travelled < 0 ? 1 : -1) }
             if event.phase == .ended || event.phase == .cancelled { travelled = 0; fired = false }
         }
+    }
+}
+
+/// Over a full-window photo, the footer text gets the same capsule material as the toolbar so it stays readable.
+struct OverPhoto: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active {
+            content.padding(.horizontal, 12).frame(height: 30)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
+        } else { content }
     }
 }

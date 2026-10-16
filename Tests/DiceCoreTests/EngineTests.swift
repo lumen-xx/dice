@@ -934,6 +934,17 @@ final class EngineTests {
         XCTAssertTrue(text.contains("Lantern")); XCTAssertTrue(ImageSearch.matches("lantern 42", text: ImageSearch.text(filename: "a.png", path: "/tmp", info: nil, recognizedText: text)))
         XCTAssertEqual(ImageSearch.recognizedText(in: image(32)), "")
     }
+    func testOpacityForFitToWindow() throws {
+        func drawn(_ draw: (CGContext) -> Void) -> CGImage {
+            let c = CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            draw(c); return c.makeImage()!
+        }
+        let full = CGRect(x: 0, y: 0, width: 400, height: 300)
+        XCTAssertTrue(Opacity.isOpaque(drawn { $0.setFillColor(CGColor(red: 0.2, green: 0.5, blue: 0.8, alpha: 1)); $0.fill(full) }))
+        XCTAssertTrue(!Opacity.isOpaque(drawn { $0.setFillColor(CGColor(gray: 0.5, alpha: 1)); $0.fill(CGRect(x: 0, y: 0, width: 400, height: 280)) }))
+        XCTAssertTrue(!Opacity.isOpaque(drawn { $0.setFillColor(CGColor(gray: 0.5, alpha: 0.5)); $0.fill(full) }))
+        XCTAssertTrue(Opacity.isOpaque(image(32)))
+    }
 }
 
 @main struct Checks {
@@ -992,7 +1003,8 @@ final class EngineTests {
             ("location-only metadata removal", suite.testLocationOnlyRemoval),
             ("background removal", suite.testBackgroundRemoval),
             ("JPEG XL output, lossless, metadata and target size", suite.testJPEGXL),
-            ("text in images for search", suite.testRecognizedTextForSearch)
+            ("text in images for search", suite.testRecognizedTextForSearch),
+            ("opacity for fit to window", suite.testOpacityForFitToWindow)
         ]
         for (name, check) in checks {
             let before = failures

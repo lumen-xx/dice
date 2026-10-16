@@ -1,3 +1,28 @@
+# v0.2.8 clean settings and fit to window — 2026-10-16
+
+All 54 standalone checks pass, one of them new: `Opacity.isOpaque` accepts an opaque image (with or without an alpha channel), and rejects one with a transparent strip and one that is half transparent.
+
+Image settings went through three versions in Dice Dev before landing on a plain list:
+- Glass tiles that each folded open: too many folding items, too big, and too much purple.
+- Flat capsule rows: still not clean enough.
+- The final version: a monochrome popover with eight rows of label on the left and value on the right. The rows are Format, Quality, Size, Rotate, Crop, Metadata, Remove background and Replace originals. Format and Size options (Metadata only, Lossless, Optimise PNG, Combine into one PDF, sRGB, HDR, Allow enlarging, Resize only, @1x–3x, PDF resolution) sit in their rows' menus as checkmark items.
+
+Seven rows have an ⓘ whose tip is drawn inside the panel, because a tip in its own popover only opened sometimes inside the settings popover. App settings is regrouped into New images, Saving, Conversion, Window, System and Updates with the same rows, and switches in both panels are a monochrome `MonoSwitch`.
+
+Native review of Dice Dev in dark and light, driving controls through the accessibility API:
+- Rotate, flip, % / KB and every switch respond; one switch was toggled and toggled back, and VoiceOver reads switches as checkboxes.
+- The Format and Size menus open with checkmarks and their extra options, and close through AXCancel.
+- The Remove background and Size tips show above and below their rows.
+- A 90° rotation fits next to the buttons, after an earlier version cut it to "…".
+
+Not checked: hovering with a real mouse, and the File name field and colour well in use.
+
+New **Fit photos to the window** (App settings › Window, off by default): an opaque photo fills the window edge to edge behind the controls, and the footer text gets a capsule so it stays readable. Images with transparent pixels, and SVGs, PDFs and Illustrator files, keep the inset layout. Native check with a 6016 × 6016 HEIC, an 800 × 600 PNG with a transparent background, and an SVG: the HEIC fills the window, while the PNG and the SVG look as before.
+
+Fixed while checking this: opening a mixed selection from Finder (here HEIC, PNG and SVG) loaded only some of the files. macOS sent one open event per type, and each event cleared the batch the one before it had started. Open events within 0.25 s are now merged into one selection; the same three files then open as a batch of 3 (before: 2).
+
+---
+
 # v0.2.7 drop fix and inline Adjust — 2026-10-16
 
 All 53 standalone checks pass, one of them new: text drawn into an image ("Lantern 42") is recognised and found by a search for "lantern 42", and a blank image yields no text.
