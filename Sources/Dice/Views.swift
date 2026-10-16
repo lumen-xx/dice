@@ -295,7 +295,7 @@ struct DiceView: View {
                 if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
                 if model.options.resize == .fit { HStack { number($model.options.width); Text("×"); number($model.options.height); Text("px") } }
                 if model.options.resize != .original && !model.preferences.alwaysStripMetadata { HStack(spacing: 6) { Toggle("Resize only", isOn: $model.options.resizeOnly); InfoTip("Keep format and metadata; skip images already within the target size"); Spacer(minLength: 0) } }
-                if model.options.format.usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { HStack { Text("Quality"); Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() } }
+                if usesQuality && !(model.options.resizeOnly && model.options.resize != .original && !model.preferences.alwaysStripMetadata) { HStack { Text("Quality"); Slider(value: $model.options.quality, in: 0.1...1); Text("\(Int(model.options.quality * 100))%").monospacedDigit() } }
                 if model.options.format == .webp { Toggle("Lossless", isOn: $model.options.webpLossless) }
             }
             if !model.preferences.alwaysStripMetadata { Toggle("Remove personal metadata", isOn: $model.options.stripMetadata).disabled(model.options.metadataOnly) }
@@ -304,6 +304,8 @@ struct DiceView: View {
         }.font(DiceStyle.label).padding(DiceStyle.inset).frame(width: 360).tint(accent)
             .disabled(model.busy || model.importing)
     }
+    /// "Same as original" only shows Quality when some image in the batch is written in a lossy format.
+    var usesQuality: Bool { model.items.contains { model.options.format.usesQuality(forInputType: $0.info?.type ?? "") } }
     func number(_ binding: Binding<Int>) -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel("Resize value") }
     func loadPreview() async {
         guard let item = model.selection, let url = displayedURL else { preview = nil; inspected = nil; previewError = nil; return }

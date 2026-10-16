@@ -25,7 +25,18 @@ import ServiceManagement
         previews.target = delegate; previews.state = delegate.updates.includePreviews ? .on : .off
         applicationMenu.addItem(previews); applicationMenu.addItem(.separator())
         applicationMenu.addItem(withTitle: "Quit Dice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        root.submenu = applicationMenu; menu.addItem(root); app.mainMenu = menu
+        root.submenu = applicationMenu; menu.addItem(root)
+        // Without an Edit menu, Command-C/V/X/A/Z never reach text fields. Paste outside a text field adds images (DiceDelegate.paste).
+        let edit = NSMenuItem(); let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.submenu = editMenu; menu.addItem(edit)
+        app.mainMenu = menu
         app.run()
         withExtendedLifetime(delegate) {}
     }
@@ -111,6 +122,11 @@ final class DiceWindow: NSWindow {
         if Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool != true { NSApp.servicesProvider = self; NSUpdateDynamicServices() }; updates.start(); showWindow() }
     @objc func showSettings(_ sender: Any?) { showWindow(); model.settingsPresented = true }
     @objc func saveCopies(_ sender: Any?) { model.save() }
+    /// Reached when no text field takes the paste: pasted files or image data join the batch.
+    @objc func paste(_ sender: Any?) {
+        guard !model.busy && !model.importing else { model.alert = "Finish the current images before adding more."; return }
+        showWindow(); model.paste()
+    }
     @objc func checkForUpdates(_ sender: Any?) { showWindow(); updates.check(sender) }
     @objc func togglePreviewUpdates(_ sender: NSMenuItem) { updates.includePreviews.toggle(); sender.state = updates.includePreviews ? .on : .off }
     // Finder launches should reveal Dice's drop surface, never the default document picker.

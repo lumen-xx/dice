@@ -357,6 +357,129 @@ final class EngineTests {
         try Data().write(to: first)
         XCTAssertEqual(Engine.uniqueURL(in: directory,stem:"photo-dice",ext:"jpg").lastPathComponent,"photo-dice-2.jpg")
     }
+    func image(_ size: Int, space: CGColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!, alpha: Double = 1) -> CGImage {
+        let c = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.setFillColor(CGColor(colorSpace: space, components: [0, 1, 0, alpha])!); c.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        return c.makeImage()!
+    }
+    func write(_ images: [CGImage], to url: URL, type: UTType) {
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, images.count, nil)!
+        for image in images { CGImageDestinationAddImage(dest, image, nil) }
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+    }
+    func testBMPWithKeptMetadata() throws {
+        let input = try fixture(format: UTType.png.identifier)
+        _ = try runExif(["-overwrite_original", "-Artist=Kept", input.path])
+        var options = Options(); options.format = .bmp; options.stripMetadata = false
+        let output = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertEqual(output.url.pathExtension, "bmp"); XCTAssertEqual(dimensions(output.url).0, 120)
+        XCTAssertTrue(output.note?.contains("can't hold metadata") == true)
+    }
+    func testMultiSizeIconsAreOneImage() throws {
+        let input = directory.appendingPathComponent("app.ico")
+        write([image(16), image(48), image(32)], to: input, type: .ico)
+        let info = try Engine.inspect(input)
+        XCTAssertEqual(info.frames, 1); XCTAssertEqual(info.width, 48)
+        let output = try Engine.convert(input, options: Options(), directory: directory)
+        XCTAssertFalse(output.isFolder); XCTAssertEqual(dimensions(output.url).0, 48)
+        XCTAssertEqual(output.url.pathExtension, "png")
+        XCTAssertTrue(output.note?.contains("Saved as PNG") == true)
+    }
+    func testWebPTemporaryKeepsOtherResults() throws {
+        let input = try fixture(name: "photo", format: UTType.png.identifier)
+        let processing = directory.appendingPathComponent("processing")
+        try FileManager.default.createDirectory(at: processing, withIntermediateDirectories: true)
+        let other = processing.appendingPathComponent("photo-dice.png")
+        try Data("earlier result".utf8).write(to: other)
+        var options = Options(); options.format = .webp
+        let output = try Engine.convert(input, options: options, directory: processing)
+        XCTAssertEqual(output.url.lastPathComponent, "photo-dice.webp")
+        XCTAssertEqual(try Data(contentsOf: other), Data("earlier result".utf8))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: processing.path).sorted(), ["photo-dice.png", "photo-dice.webp"])
+    }
+    func testVectorsRenderLargerThanIntrinsicSize() throws {
+        let input = directory.appendingPathComponent("icon.svg")
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='16'><rect width='24' height='16' fill='red'/></svg>".utf8).write(to: input)
+        var options = Options(); options.resize = .edge; options.edge = 480
+        let edge = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertEqual(dimensions(edge.url).0, 480); XCTAssertEqual(dimensions(edge.url).1, 320)
+        options.resize = .fit; options.width = 300; options.height = 100
+        let fit = try Engine.convert(input, options: options, directory: directory)
+        XCTAssertEqual(dimensions(fit.url).0, 150); XCTAssertEqual(dimensions(fit.url).1, 100)
+        let pdf = try pdfFixture()
+        options.resize = .edge; options.edge = 1000
+        XCTAssertEqual(dimensions(try Engine.convert(pdf, options: options, directory: directory).url).0, 1000)
+        // Raster images still never grow.
+        let raster = try fixture(format: UTType.png.identifier)
+        XCTAssertEqual(dimensions(try Engine.convert(raster, options: options, directory: directory).url).0, 120)
+    }
+    func testSameAsOriginalFallbacksAndQuality() throws {
+        func match(_ type: String) -> String { let m = OutputFormat.matching(inputType: type); return m.format.rawValue + (m.exact ? "" : "*") }
+        XCTAssertEqual(match(UTType.jpeg.identifier), "JPEG"); XCTAssertEqual(match("public.heif"), "HEIC*")
+        XCTAssertEqual(match("public.heics"), "HEIC*"); XCTAssertEqual(match("public.avis"), "AVIF*")
+        XCTAssertEqual(match("com.adobe.raw-image"), "JPEG*"); XCTAssertEqual(match("com.sony.arw-raw-image"), "JPEG*")
+        XCTAssertEqual(match("public.jpeg-xl"), "JPEG*"); XCTAssertEqual(match("com.adobe.photoshop-image"), "PNG*")
+        XCTAssertEqual(match(UTType.pdf.identifier), "PNG*")
+        XCTAssertFalse(OutputFormat.original.usesQuality(forInputType: UTType.png.identifier))
+        XCTAssertFalse(OutputFormat.original.usesQuality(forInputType: UTType.svg.identifier))
+        XCTAssertTrue(OutputFormat.original.usesQuality(forInputType: "com.adobe.raw-image"))
+        XCTAssertTrue(OutputFormat.jpeg.usesQuality(forInputType: UTType.png.identifier))
+        XCTAssertFalse(OutputFormat.png.usesQuality(forInputType: UTType.jpeg.identifier))
+        // A format Dice reads but can't write converts to its fallback, with a note.
+        let input = directory.appendingPathComponent("photo.jp2")
+        write([image(40)], to: input, type: UTType("public.jpeg-2000")!)
+        let output = try Engine.convert(input, options: Options(), directory: directory)
+        XCTAssertEqual(output.url.pathExtension, "jpg"); XCTAssertTrue(output.note?.contains("Saved as JPEG") == true)
+    }
+    func testSessionChoicesReset() throws {
+        var options = Options(); options.metadataOnly = true; options.resizeOnly = true; options.webpLossless = true; options.quality = 0.4
+        options.resetSessionChoices()
+        XCTAssertFalse(options.metadataOnly); XCTAssertFalse(options.resizeOnly); XCTAssertFalse(options.webpLossless)
+        XCTAssertEqual(options.quality, 0.4)
+    }
+    func testPagesReuseFileMetadata() throws {
+        let input = try pdfFixture()
+        let first = try Engine.inspect(input, page: 1)
+        let tools = ProcessInfo.processInfo.environment["DICE_TOOLS"]
+        setenv("DICE_TOOLS", directory.appendingPathComponent("no-tools").path, 1)
+        defer { if let tools { setenv("DICE_TOOLS", tools, 1) } else { unsetenv("DICE_TOOLS") } }
+        // With ExifTool unreachable, page 2 can only succeed by reusing page 1's metadata.
+        XCTAssertThrowsError(try Engine.inspect(input, page: 2))
+        let second = try Engine.inspect(input, page: 2, reusing: first)
+        XCTAssertEqual(second.value("Page"), "2 of 2")
+        XCTAssertEqual(second.rows.filter { $0.group != "Dice" }.map(\.id), first.rows.filter { $0.group != "Dice" }.map(\.id))
+        XCTAssertEqual(second.rows.filter { $0.name == "Page" }.count, 1)
+    }
+    func testFoldersExpandToImages() throws {
+        let folder = directory.appendingPathComponent("shoot")
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("day 2"), withIntermediateDirectories: true)
+        write([image(8)], to: folder.appendingPathComponent("b.png"), type: .png)
+        write([image(8)], to: folder.appendingPathComponent("day 2/a.jpg"), type: .jpeg)
+        write([image(8)], to: folder.appendingPathComponent(".hidden.png"), type: .png)
+        try Data("notes".utf8).write(to: folder.appendingPathComponent("notes.txt"))
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>".utf8).write(to: folder.appendingPathComponent("c.svg"))
+        let loose = directory.appendingPathComponent("loose.txt"); try Data().write(to: loose)
+        let all = ImageFiles.expand([folder, loose])
+        let base = folder.resolvingSymlinksInPath().path + "/"
+        XCTAssertEqual(all.urls.map { $0.resolvingSymlinksInPath().path.replacingOccurrences(of: base, with: "") }, ["b.png", "c.svg", "day 2/a.jpg", loose.resolvingSymlinksInPath().path])
+        XCTAssertFalse(all.truncated)
+        let limited = ImageFiles.expand([folder], limit: 2)
+        XCTAssertEqual(limited.urls.count, 2); XCTAssertTrue(limited.truncated)
+    }
+    func testToolTimeout() throws {
+        let start = Date()
+        XCTAssertThrowsError(try Engine.run(URL(fileURLWithPath: "/bin/sleep"), ["10"], timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 4)
+        XCTAssertEqual(try Engine.run(URL(fileURLWithPath: "/bin/echo"), ["ok"], timeout: 5), Data("ok\n".utf8))
+    }
+    func testFlattenKeepsWideGamut() throws {
+        let input = directory.appendingPathComponent("p3.png")
+        write([image(20, space: CGColorSpace(name: CGColorSpace.displayP3)!, alpha: 0.5)], to: input, type: .png)
+        var options = Options(); options.format = .jpeg; options.quality = 1
+        let output = try Engine.convert(input, options: options, directory: directory)
+        let props = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithURL(output.url as CFURL, nil)!, 0, nil) as! [String: Any]
+        XCTAssertEqual(props[kCGImagePropertyProfileName as String] as? String, "Display P3")
+    }
 }
 
 @main struct Checks {
@@ -384,7 +507,17 @@ final class EngineTests {
             ("replace original and legacy saved options", suite.testReplaceOriginalAndLegacyOptions),
             ("preview memory budget, eviction and page keys", suite.testPreviewBudgetAndPageKeys),
             ("preview decode and cache performance", suite.testPreviewPerformance),
-            ("filename collisions", suite.testCollisionSafeNames)
+            ("filename collisions", suite.testCollisionSafeNames),
+            ("BMP output with metadata kept", suite.testBMPWithKeptMetadata),
+            ("multi-size icons are one image", suite.testMultiSizeIconsAreOneImage),
+            ("WebP temporary file keeps other results", suite.testWebPTemporaryKeepsOtherResults),
+            ("SVG and PDF render larger than intrinsic size", suite.testVectorsRenderLargerThanIntrinsicSize),
+            ("same-as-original fallbacks and quality visibility", suite.testSameAsOriginalFallbacksAndQuality),
+            ("session-only choices reset", suite.testSessionChoicesReset),
+            ("pages reuse file metadata", suite.testPagesReuseFileMetadata),
+            ("folders expand to images", suite.testFoldersExpandToImages),
+            ("bundled tool timeout", suite.testToolTimeout),
+            ("flattening keeps wide-gamut colour", suite.testFlattenKeepsWideGamut)
         ]
         for (name, check) in checks {
             let before = failures

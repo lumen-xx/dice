@@ -58,8 +58,8 @@ struct ImageItem: Identifiable {
     var sourceBytes: Int64 { results.reduce(0) { $0 + ($1.info?.bytes ?? 0) } }
     var outputBytes: Int64 { results.reduce(0) { $0 + ($1.result?.bytes ?? 0) } }
     func chooseFiles() {
-        let panel = NSOpenPanel(); panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.image, .svg, .pdf]; panel.message = "Choose images to convert or inspect"
+        let panel = NSOpenPanel(); panel.allowsMultipleSelection = true; panel.canChooseDirectories = true
+        panel.allowedContentTypes = [.image, .svg, .pdf]; panel.message = "Choose images or folders to convert or inspect"
         if panel.runModal() == .OK { add(panel.urls) }
     }
     func paste() {
@@ -72,7 +72,9 @@ struct ImageItem: Identifiable {
     }
     func add(_ urls: [URL]) {
         guard !busy, !importing else { return }
-        let accepted = Array(Set(urls.filter { $0.isFileURL })).sorted { $0.path < $1.path }
+        let expanded = ImageFiles.expand(urls.filter { $0.isFileURL })
+        if expanded.truncated { alert = "Dice opened the first \(ImageFiles.folderLimit) images from the folder. Add the rest in another session." }
+        let accepted = Array(Set(expanded.urls)).sorted { $0.path < $1.path }
         let fresh = accepted.filter { url in !items.contains(where: { $0.url == url }) }
         guard !fresh.isEmpty else { return }
         if items.isEmpty {
@@ -83,6 +85,7 @@ struct ImageItem: Identifiable {
             options.percent = preferences.defaultPercent
             options.replaceOriginals = preferences.defaultReplaceOriginals
             options.stripMetadata = preferences.alwaysStripMetadata || preferences.defaultStripMetadata
+            options.resetSessionChoices()
         }
         closeRequested = false
         importing = true
@@ -94,9 +97,11 @@ struct ImageItem: Identifiable {
                     do { pages = try Engine.pageCount(url) } catch {
                         var item = ImageItem(url: url); item.error = error.localizedDescription; item.rebuildSearch(); return [item]
                     }
+                    var first: ImageInfo?
                     return (1...pages).map { page in autoreleasepool {
                     var item = ImageItem(url: url, page: page)
-                    do { item.info = try Engine.inspect(url, page: page) } catch { item.error = error.localizedDescription }
+                    // File-level metadata is the same on every page; read it once.
+                    do { item.info = try Engine.inspect(url, page: page, reusing: first); if first == nil { first = item.info } } catch { item.error = error.localizedDescription }
                     if let image = try? Engine.previewImage(url, maxPixelSize: 1600, page: page) {
                         cache.insert(image, for: PreviewCache.key(url, page: page))
                         if let thumbnail = try? Engine.scaledPreview(image, maxPixelSize: 96) { item.thumbnail = NSImage(cgImage: thumbnail, size: .zero) }
@@ -128,12 +133,12 @@ struct ImageItem: Identifiable {
         items.removeAll { $0.id == id }
         if selected == id { selected = items.isEmpty ? nil : items[min(removedIndex, items.count - 1)].id }
     }
+    /// Trashes the file and removes every entry from it, so all pages of a PDF or TIFF go together.
     func trashOriginal(_ id: UUID) {
         guard !busy, !importing, let item = items.first(where: { $0.id == id }) else { return }
-        let others = items.contains { $0.id != id && $0.url == item.url }
         do {
-            if !others { try FileManager.default.trashItem(at: item.url, resultingItemURL: nil) }
-            remove(id)
+            try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+            for entry in items where entry.url == item.url { remove(entry.id) }
             status = "Moved \(item.url.lastPathComponent) to the Trash"
         } catch { alert = error.localizedDescription }
     }
@@ -189,9 +194,12 @@ struct ImageItem: Identifiable {
                 case .success(nil): items[index].error = nil
                 case .success(let output?):
                     items[index].result = output; items[index].error = nil
+                    // Pasted images live in the session folder, which is deleted on quit; their copies go to Downloads.
+                    let pasted = input.deletingLastPathComponent().standardizedFileURL == session.standardizedFileURL
+                    let directory = exportDirectory ?? (pasted ? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first : nil)
                     // PDFs, SVGs and multi-frame files produce one output per page, so they are never replaced in place.
-                    let replace = snapshot.replaceOriginals && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1 && !skipSave
-                    let saved: Result<URL, Error>? = skipSave ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: exportDirectory) } }.value
+                    let replace = snapshot.replaceOriginals && !pasted && !["pdf", "svg"].contains(input.pathExtension.lowercased()) && (items[index].info?.frames ?? 1) == 1 && !skipSave
+                    let saved: Result<URL, Error>? = skipSave ? nil : await Task.detached(priority: .userInitiated) { Result { replace ? try Engine.replaceOriginal(input, with: output) : try Engine.saveCopy(output, beside: input, directory: directory) } }.value
                     var replacedHere = false
                     switch saved {
                     case nil: break
@@ -216,6 +224,7 @@ struct ImageItem: Identifiable {
             if closeRequested { clear(); return }
             status = edit && opened > 0 ? "Opened \(opened) image\(opened == 1 ? "" : "s") for editing" : clipboard && copied > 0 ? "Copied \(copied) image\(copied == 1 ? "" : "s") to the clipboard" : cancelRequested ? "Stopped after the current image" : (replaced > 0 ? "Replaced \(replaced) original\(replaced == 1 ? "" : "s"); moved to the Trash" : resizeOnly ? "Resized \(results.count) images; smaller images skipped" : "\(results.count) of \(items.count) images processed")
             if let error = items.first(where: { $0.error != nil })?.error { alert = error }
+            else if !cancelRequested && results.isEmpty { alert = resizeOnly ? "Every image is already within the target size, so nothing was saved." : "No images were processed." }
             else if !cancelRequested { onFinished?() }
         }
     }

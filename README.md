@@ -13,7 +13,7 @@ Dice is not notarized yet.
 
 ## Use
 
-Drop images, PDFs or SVGs on the window, or right-click them in Finder → **Edit with Dice**. Adjust the settings (sliders icon), then press ▶. Results are saved beside the originals, in a default folder, or over the originals (moved to the Trash) if you choose **Replace originals**.
+Drop images, PDFs, SVGs or folders on the window, paste with ⌘V, or right-click them in Finder → **Edit with Dice**. Adjust the settings (sliders icon), then press ▶. Results are saved beside the originals, in a default folder, or over the originals (moved to the Trash) if you choose **Replace originals**.
 
 ![Image editor](docs/image.png)
 ![Metadata viewer](docs/metadata.png)

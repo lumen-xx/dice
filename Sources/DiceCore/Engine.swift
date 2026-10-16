@@ -13,7 +13,22 @@ public enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Codable 
     public var ext: String { switch self { case .jpeg: return "jpg"; case .png: return "png"; case .heic: return "heic"; case .webp: return "webp"; case .gif: return "gif"; case .bmp: return "bmp"; case .tiff: return "tiff"; case .avif: return "avif"; case .original: return "" } }
     public var type: String { switch self { case .jpeg: return UTType.jpeg.identifier; case .png: return UTType.png.identifier; case .heic: return UTType.heic.identifier; case .webp: return "org.webmproject.webp"; case .gif: return UTType.gif.identifier; case .bmp: return UTType.bmp.identifier; case .tiff: return UTType.tiff.identifier; case .avif: return "public.avif"; case .original: return "" } }
     public var usesQuality: Bool { [.original, .jpeg, .heic, .webp, .avif].contains(self) }
-
+    /// ExifTool cannot write BMP, so kept metadata is dropped there.
+    public var holdsMetadata: Bool { self != .bmp && self != .original }
+    /// What "Same as original" writes for an input type. `exact` is false when Dice cannot write that type:
+    /// HEIF variants become HEIC, camera and other photographic formats JPEG, everything else PNG.
+    public static func matching(inputType: String) -> (format: OutputFormat, exact: Bool) {
+        if let same = allCases.first(where: { $0 != .original && $0.type == inputType }) { return (same, true) }
+        let type = UTType(inputType)
+        if ["public.heif", "public.heics", "public.avci"].contains(inputType) { return (.heic, false) }
+        if inputType == "public.avis" { return (.avif, false) }
+        if type?.conforms(to: .rawImage) == true || ["public.jpeg-2000", "public.jpeg-xl", "public.mpo-image"].contains(inputType) { return (.jpeg, false) }
+        return (.png, false)
+    }
+    /// Whether the quality setting changes the output for this input type.
+    public func usesQuality(forInputType inputType: String) -> Bool {
+        self == .original ? OutputFormat.matching(inputType: inputType).format.usesQuality : usesQuality
+    }
 }
 public enum ResizeMode: String, CaseIterable, Identifiable, Sendable, Codable {
     case original = "Original size", edge = "Longest edge", percent = "Percentage", fit = "Fit within dimensions"
@@ -62,13 +77,19 @@ public struct Options: Sendable, Codable {
         framesAsFolder = try c.decodeIfPresent(Bool.self, forKey: .framesAsFolder) ?? framesAsFolder
         fileSuffix = try c.decodeIfPresent(String.self, forKey: .fileSuffix) ?? fileSuffix
     }
-    public func longestEdge(width w: Int, height h: Int) throws -> Int {
+    /// Choices that only make sense for the images they were made for; a new session starts without them.
+    public mutating func resetSessionChoices() { metadataOnly = false; resizeOnly = false; webpLossless = false }
+    /// Target longest edge. Raster images never grow; vector documents (`upscale`) render at any requested size.
+    public func longestEdge(width w: Int, height h: Int, upscale: Bool = false) throws -> Int {
         let longest = max(w,h)
         switch resize {
         case .original: return longest
-        case .edge: guard edge > 0 else { throw DiceError.message("Enter a longest edge greater than zero.") }; return min(longest, edge)
+        case .edge: guard edge > 0 else { throw DiceError.message("Enter a longest edge greater than zero.") }; return upscale ? edge : min(longest, edge)
         case .percent: guard percent > 0 && percent <= 100 else { throw DiceError.message("Percentage must be between 1 and 100.") }; return max(1, Int(Double(longest) * Double(percent) / 100))
-        case .fit: guard width > 0 && height > 0 else { throw DiceError.message("Width and height must be greater than zero.") }; return max(1, Int(Double(longest) * min(1, min(Double(width)/Double(w), Double(height)/Double(h)))))
+        case .fit:
+            guard width > 0 && height > 0 else { throw DiceError.message("Width and height must be greater than zero.") }
+            let factor = min(Double(width)/Double(w), Double(height)/Double(h))
+            return max(1, Int(Double(longest) * (upscale ? factor : min(1, factor))))
         }
     }
 }
@@ -107,7 +128,9 @@ public enum Engine {
         format == .original || format == .webp || (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(format.type) == true
     }
     public static func fileSize(_ url: URL) -> Int64 { (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0 }
-    static func run(_ executable: URL, _ args: [String]) throws -> Data {
+    /// Longest a bundled tool may run on one file before it is stopped.
+    public static let toolTimeout: TimeInterval = 180
+    public static func run(_ executable: URL, _ args: [String], timeout: TimeInterval = toolTimeout) throws -> Data {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("dice-tool-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -122,7 +145,14 @@ public enum Engine {
         for key in ["PERL5LIB", "PERL5OPT", "PERLLIB", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"] { environment.removeValue(forKey: key) }
         process.environment = environment
         process.standardOutput = oh; process.standardError = eh
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         do { try process.run() } catch { throw DiceError.message("Could not start the image tool. Rebuild Dice with its bundled tools. " + error.localizedDescription) }
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            if exited.wait(timeout: .now() + 2) == .timedOut { kill(process.processIdentifier, SIGKILL); process.waitUntilExit() }
+            throw DiceError.message("The image tool took longer than \(Int(timeout)) seconds on this file and was stopped.")
+        }
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             let message = String(data: (try? Data(contentsOf: err)) ?? Data(), encoding: .utf8) ?? ""
@@ -140,6 +170,27 @@ public enum Engine {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) as String?, type == UTType.tiff.identifier else { return 1 }
         return max(1, CGImageSourceGetCount(source))
     }
+    /// Types whose extra images are animation frames. TIFF images are pages; in other containers
+    /// (icons, MPO stereo pairs, RAW previews, HEIC collections) the extras are alternatives to one picture.
+    static let animationTypes: Set<String> = [UTType.gif.identifier, "org.webmproject.webp", UTType.png.identifier, "public.heics", "public.avis"]
+    static func frameCount(_ source: CGImageSource) -> Int {
+        let type = (CGImageSourceGetType(source) as String?) ?? ""
+        return type == UTType.tiff.identifier || animationTypes.contains(type) ? CGImageSourceGetCount(source) : 1
+    }
+    /// The image to read for `page`: that page or frame where they exist, otherwise the largest icon size or the primary image.
+    static func imageIndex(_ source: CGImageSource, page: Int) -> Int {
+        let type = (CGImageSourceGetType(source) as String?) ?? ""
+        if type == UTType.tiff.identifier || animationTypes.contains(type) { return page - 1 }
+        let count = CGImageSourceGetCount(source)
+        if [UTType.ico.identifier, UTType.icns.identifier, "com.microsoft.cur"].contains(type), count > 1 {
+            func area(_ i: Int) -> Int {
+                let p = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as? [String: Any]
+                return (p?[kCGImagePropertyPixelWidth as String] as? Int ?? 0) * (p?[kCGImagePropertyPixelHeight as String] as? Int ?? 0)
+            }
+            return (0..<count).max { area($0) < area($1) } ?? 0
+        }
+        return page == 1 ? CGImageSourceGetPrimaryImageIndex(source) : count
+    }
     public static func scaledPreview(_ image: CGImage, maxPixelSize: Int) throws -> CGImage {
         let factor = min(1, Double(maxPixelSize) / Double(max(image.width, image.height)))
         let w = max(1, Int(Double(image.width) * factor)), h = max(1, Int(Double(image.height) * factor))
@@ -154,10 +205,11 @@ public enum Engine {
             let (w, h, _) = try DocumentImage.dimensions(url, page: page)
             return try DocumentImage.render(url, page: page, edge: min(max(w, h), maxPixelSize))
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, page - 1, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw DiceError.message("This image has no preview.") }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, imageIndex(source, page: page), [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw DiceError.message("This image has no preview.") }
         return image
     }
-    public static func inspect(_ url: URL, page: Int = 1) throws -> ImageInfo {
+    /// `reusing` is another page of the same file: its file-level metadata is reused instead of running ExifTool again.
+    public static func inspect(_ url: URL, page: Int = 1, reusing known: ImageInfo? = nil) throws -> ImageInfo {
         let rawW: Int, rawH: Int, frames: Int, type: String
         let swapped: Bool
         if DocumentImage.isDocument(url) {
@@ -165,19 +217,28 @@ public enum Engine {
             type = url.pathExtension.lowercased() == "pdf" ? UTType.pdf.identifier : UTType.svg.identifier
             swapped = false
         } else {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let props = CGImageSourceCopyPropertiesAtIndex(source, page - 1, nil) as? [String: Any] else { throw DiceError.message("This file or frame is not a supported image.") }
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let props = CGImageSourceCopyPropertiesAtIndex(source, imageIndex(source, page: page), nil) as? [String: Any] else { throw DiceError.message("This file or frame is not a supported image.") }
             rawW = props[kCGImagePropertyPixelWidth as String] as? Int ?? 0
             rawH = props[kCGImagePropertyPixelHeight as String] as? Int ?? 0
             swapped = (5...8).contains(props[kCGImagePropertyOrientation as String] as? Int ?? 1)
             type = (CGImageSourceGetType(source) as String?) ?? "Unknown"
-            frames = CGImageSourceGetCount(source)
+            frames = frameCount(source)
         }
+        var rows = try known.map { $0.rows.filter { $0.group != "Dice" } } ?? metadataRows(url)
+        if DocumentImage.isDocument(url) {
+            rows += [MetadataRow(group: "Dice", name: "FileType", value: url.pathExtension.uppercased()), MetadataRow(group: "Dice", name: "RasterSize", value: "\(rawW)x\(rawH)")]
+            if type == UTType.pdf.identifier { rows += [MetadataRow(group: "Dice", name: "Page", value: "\(page) of \(frames)"), MetadataRow(group: "Dice", name: "RenderDPI", value: "144")] }
+            rows.sort { ($0.group, $0.name) < ($1.group, $1.name) }
+        }
+        return ImageInfo(width: swapped ? rawH : rawW, height: swapped ? rawW : rawH, bytes: fileSize(url), type: type, frames: frames, rows: rows)
+    }
+    static func metadataRows(_ url: URL) throws -> [MetadataRow] {
         let data: Data
         if url.pathExtension.lowercased() == "svg" {
             data = (try? exif(["-j", "-G1:4", "-a", "-u", "-s", "-struct", url.path])) ?? Data("[{}]".utf8)
         } else { data = try exif(["-j", "-G1:4", "-a", "-u", "-s", "-struct", url.path]) }
         guard let object = (try JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first else { throw DiceError.message("Could not read image metadata.") }
-        var rows = object.filter { $0.key != "SourceFile" }.map { key, value -> MetadataRow in
+        return object.filter { $0.key != "SourceFile" }.map { key, value -> MetadataRow in
             let split = key.split(separator: ":", omittingEmptySubsequences: false)
             let name = String(split.last ?? Substring(key))
             let group = split.count > 1 ? split.dropLast().joined(separator: ":") : "File"
@@ -187,12 +248,6 @@ public enum Engine {
             else { text = String(describing: value) }
             return MetadataRow(group: group, name: name, value: text)
         }.sorted { ($0.group, $0.name) < ($1.group, $1.name) }
-        if DocumentImage.isDocument(url) {
-            rows += [MetadataRow(group: "Dice", name: "FileType", value: url.pathExtension.uppercased()), MetadataRow(group: "Dice", name: "RasterSize", value: "\(rawW)x\(rawH)")]
-            if type == UTType.pdf.identifier { rows += [MetadataRow(group: "Dice", name: "Page", value: "\(page) of \(frames)"), MetadataRow(group: "Dice", name: "RenderDPI", value: "144")] }
-            rows.sort { ($0.group, $0.name) < ($1.group, $1.name) }
-        }
-        return ImageInfo(width: swapped ? rawH : rawW, height: swapped ? rawW : rawH, bytes: fileSize(url), type: type, frames: frames, rows: rows)
     }
     /// Resolution-only batch action. Already-small inputs are left untouched.
     public static func resize(_ input: URL, options: Options, directory: URL, page: Int = 1) throws -> ConversionResult? {
@@ -210,11 +265,11 @@ public enum Engine {
         let inputType = document ? (input.pathExtension.lowercased() == "pdf" ? UTType.pdf.identifier : UTType.svg.identifier) : ((source.flatMap { CGImageSourceGetType($0) } as String?) ?? "")
         guard document || source != nil else { throw DiceError.message("This file is not a supported image.") }
         var format = options.format
+        var notes: [String] = []
         if format == .original && !options.metadataOnly {
-            if document { format = .png }
-            else {
-                format = OutputFormat.allCases.first(where: { $0 != .original && $0.type == inputType }) ?? .png
-            }
+            let match = OutputFormat.matching(inputType: inputType)
+            format = match.format
+            if !match.exact && !document { notes.append("Saved as \(format.rawValue); Dice can't write \(UTType(inputType)?.localizedDescription ?? "this format")") }
         }
         let count = try pageCount(input)
         let suffix = inputType == UTType.pdf.identifier || (inputType == UTType.tiff.identifier && count > 1) ? "-page-\(page)" : (count > 1 ? "-frame-\(page)" : "")
@@ -232,16 +287,16 @@ public enum Engine {
             return ConversionResult(url: output, bytes: fileSize(output), note: "Pixels unchanged; colour profile and orientation retained")
         }
         let imageInfo = try inspect(input, page: page)
-        let isRaw = UTType(inputType)?.conforms(to: .rawImage) == true
-        if let source, !document, !isRaw, count == 1, imageInfo.frames > 1, inputType != UTType.tiff.identifier {
+        if let source, !document, count == 1, imageInfo.frames > 1, inputType != UTType.tiff.identifier {
             return try convertAnimated(input, source: source, format: format, options: options, info: imageInfo, directory: directory)
         }
-        let edge = try options.longestEdge(width: imageInfo.width, height: imageInfo.height)
-        var image = try previewImage(input, maxPixelSize: edge, page: page)
-        if noAlpha.contains(format) { image = try flatten(image, color: options.flattenColor) }
+        let edge = try options.longestEdge(width: imageInfo.width, height: imageInfo.height, upscale: document)
+        var image = document ? try DocumentImage.render(input, page: page, edge: edge) : try previewImage(input, maxPixelSize: edge, page: page)
+        if noAlpha.contains(format) { image = try flatten(image, color: options.flattenColor); notes.append("Transparency is flattened onto \(hex(options.flattenColor))") }
+        if !options.stripMetadata && !document && !format.holdsMetadata { notes.append("\(format.rawValue) can't hold metadata, so none was kept") }
         do {
             try encode(image, format: format, options: options, to: output)
-            if !options.stripMetadata && !document {
+            if !options.stripMetadata && !document && format.holdsMetadata {
                 // Preserve descriptive tags, but keep the profile that describes the newly encoded pixels.
                 let profile = try exif(["-b", "-ICC_Profile", output.path])
                 let profileURL = directory.appendingPathComponent(UUID().uuidString + ".icc")
@@ -251,7 +306,7 @@ public enum Engine {
                 args.append(output.path)
                 _ = try exif(args)
             }
-            return ConversionResult(url: output, bytes: fileSize(output), note: noAlpha.contains(format) ? "Transparency is flattened onto \(hex(options.flattenColor))" : nil)
+            return ConversionResult(url: output, bytes: fileSize(output), note: notes.isEmpty ? nil : notes.joined(separator: ". "))
         } catch { try? FileManager.default.removeItem(at: output); throw error }
     }
     static let noAlpha: [OutputFormat] = [.jpeg, .bmp]
@@ -261,15 +316,18 @@ public enum Engine {
     /// Draws `image` over an opaque background of `color` so formats without alpha get a predictable fill.
     static func flatten(_ image: CGImage, color: [Double]) throws -> CGImage {
         let c = color + [1, 1, 1]
-        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw DiceError.message("Could not prepare the output image.") }
+        // Keep the image's own RGB space (Display P3, for instance) so flattening doesn't clip wide-gamut colour.
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw DiceError.message("Could not prepare the output image.") }
         ctx.setFillColor(CGColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         guard let flat = ctx.makeImage() else { throw DiceError.message("Could not prepare the output image.") }
         return flat
     }
     /// Writes one still image in `format`; WebP goes through a temporary PNG and cwebp.
+    /// The temporary PNG gets its own name, so it can never replace another result beside `output`.
     static func encode(_ image: CGImage, format: OutputFormat, options: Options, to output: URL) throws {
-        let destination = format == .webp ? output.deletingPathExtension().appendingPathExtension("png") : output
+        let destination = format == .webp ? FileManager.default.temporaryDirectory.appendingPathComponent("dice-webp-" + UUID().uuidString + ".png") : output
         defer { if format == .webp { try? FileManager.default.removeItem(at: destination) } }
         let type = format == .webp ? UTType.png.identifier : format.type
         guard (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(type) == true,

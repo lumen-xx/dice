@@ -1,3 +1,11 @@
+# v0.1.28 bug fixes — 2026-10-16
+
+All 32 standalone checks pass, including ten new ones, one per fixed bug: BMP output with metadata kept; multi-size icons as one image; the WebP temporary file never replacing another result; SVG and PDF rendering above their intrinsic size; "Same as original" fallbacks and when Quality applies; session-only choices resetting; PDF pages reusing file metadata (ExifTool unreachable for page 2); folder expansion with hidden files and a limit; the bundled-tool timeout; and wide-gamut flattening. Five engine checks were confirmed to fail with the old code put back (BMP, icons, WebP temporary, vector size, flattening).
+
+Native review of Dice Dev verified the Edit menu (Undo, Redo, Cut, Copy, Paste, Select All), opening a folder as its three images including one in a subfolder, an ICO shown as a single 64 × 64 image (its largest size), and Command-V adding a pasted image to the batch. Not exercised natively: pasting text into search fields, saving a pasted image to Downloads, trashing every page of a PDF from one page, and the "nothing was saved" alert after a resize-only run that skips everything.
+
+---
+
 # v0.1.9 settings correction — 2026-10-08
 
 Native review verified two separate views: Command-comma opens App settings inside Dice with export defaults and update controls only; the sliders opens an anchored Image settings popover containing conversion, resize, quality and metadata controls. Command-comma from the open popover dismisses it and opens App settings. The release build and deep strict signature verification pass. No processing changes were made; the 20 processing checks from 0.1.8 remain applicable.
