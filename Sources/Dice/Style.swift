@@ -10,9 +10,11 @@ enum DiceStyle {
     static let violetRGB = (0.651, 0.361, 1.0)     // #A65CFF
     static let mint = color(mintRGB), cyan = color(cyanRGB), indigo = color(indigoRGB), violet = color(violetRGB)
     static let aurora: [Color] = [mint, cyan, indigo, violet]
-    /// The one solid accent: Start, control tints, selection, menu icons. Indigo keeps 4:1 contrast on light and dark surfaces.
-    static let accent = indigo
-    static let nsAccent = nsColor(indigoRGB)
+    /// The one solid accent: Start, switches, sliders, selection, menu icons. Indigo in light appearance;
+    /// a lighter indigo (#8C96FF) in dark, so it stays readable on translucent popovers over dark or busy images.
+    static let indigoLightRGB = (0.549, 0.588, 1.0)
+    static let nsAccent = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? nsColor(indigoLightRGB) : nsColor(indigoRGB) }
+    static let accent = Color(nsColor: nsAccent)
     static let nsAurora: [NSColor] = [mintRGB, cyanRGB, indigoRGB, violetRGB].map(nsColor)
     /// Closed loop for rings and the drop glow.
     static func auroraLoop(angle: Double = 0) -> AngularGradient { AngularGradient(colors: aurora + [mint], center: .center, angle: .degrees(angle)) }

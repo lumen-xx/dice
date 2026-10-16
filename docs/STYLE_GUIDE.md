@@ -28,14 +28,14 @@ Dice's colour is **Aurora**, the light that runs around the window when a file i
 |---|---|---|
 | Mint | `#34E5B8` | Start of the loop; brightest moments |
 | Cyan | `#2BC4F2` | Loop and gradients |
-| Indigo | `#5E6BFF` | **The accent**: Start, control tints, selection, menu icons |
+| Indigo | `#5E6BFF` light · `#8C96FF` dark | **The accent**: Start, switches, checkboxes, sliders, selection, menu icons |
 | Violet | `#A65CFF` | End of the loop |
 
 The values live in `Sources/Dice/Style.swift` (`DiceStyle`), with SwiftUI and AppKit versions; `scripts/icon.swift` repeats them for the icon.
 
 How to use them:
 
-- **One solid accent.** Indigo is the only flat brand colour. The Start play glyph, toggles, sliders, pickers, the selected batch row (14% indigo) and the export menu's icons use it. Indigo keeps about 4:1 contrast on both light and dark surfaces.
+- **One solid accent.** Indigo is the only flat brand colour. The Start play glyph, toggles, sliders, pickers, the selected batch row (14% indigo) and the export menu's icons use it. Dark appearance uses the lighter `#8C96FF`, so the accent stays readable on translucent popovers over dark or busy images. Pickers and pop-up menus show their value in the primary text colour, never the accent.
 - **Gradients are for brand moments only**: the drop glow and progress ring (the closed loop mint → cyan → indigo → violet → mint), the empty-state die (mint → violet, diagonal) and the app icon. Never put a gradient on text, on secondary controls or across large backgrounds.
 - **Start** is the plain play glyph in the toolbar, in indigo, with the standard 30 pt target. Disabled, it uses the native disabled appearance.
 - **Motion.** The glow turns only while an accepted file hovers over the window. The progress ring moves only when an image finishes. Nothing is animated while idle, and Reduce Motion stops both.

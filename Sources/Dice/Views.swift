@@ -219,7 +219,7 @@ struct DiceView: View {
     var appSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Export defaults").font(DiceStyle.heading)
-            Picker("When finished", selection: $model.preferences.exportMode) { ForEach(ExportMode.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("When finished", selection: $model.preferences.exportMode) { ForEach(ExportMode.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
             Toggle("Default export folder", isOn: $model.preferences.useExportFolder).disabled(model.preferences.exportMode == .clipboard)
             HStack {
                 Text(model.preferences.exportFolder.isEmpty ? "Beside originals" : model.preferences.exportFolder).font(DiceStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -229,8 +229,8 @@ struct DiceView: View {
             Toggle("Default export format", isOn: $model.preferences.useExportFormat)
             Picker("Default format", selection: $model.preferences.exportFormat) {
                 ForEach(OutputFormat.allCases.filter { $0 != .original }) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) }
-            }.disabled(!model.preferences.useExportFormat)
-            Picker("Default resize", selection: $model.preferences.defaultResize) { ForEach(ResizeMode.allCases.filter { $0 != .fit }) { Text($0.rawValue).tag($0) } }
+            }.tint(.primary).disabled(!model.preferences.useExportFormat)
+            Picker("Default resize", selection: $model.preferences.defaultResize) { ForEach(ResizeMode.allCases.filter { $0 != .fit }) { Text($0.rawValue).tag($0) } }.tint(.primary)
             if model.preferences.defaultResize == .edge { HStack { Text("Longest edge"); number($model.preferences.defaultEdge); Text("px") } }
             if model.preferences.defaultResize == .percent { HStack { Text("Scale"); number($model.preferences.defaultPercent); Text("%") } }
             HStack { Text("Default quality"); Slider(value: $model.preferences.defaultQuality, in: 0.1...1); Text("\(Int(model.preferences.defaultQuality * 100))%").monospacedDigit() }
@@ -249,7 +249,7 @@ struct DiceView: View {
             HStack(spacing: 6) { Toggle("Keep animation when saving GIF", isOn: $model.preferences.keepAnimation); InfoTip("Animated GIFs stay animated when exported as GIF. Animated WebP and other animations can be read, but only GIF is written as an animation."); Spacer(minLength: 0) }
             Picker("Animated to other formats", selection: $model.preferences.framesAsFolder) {
                 Text("Folder of frames").tag(true); Text("First frame only").tag(false)
-            }
+            }.tint(.primary)
             HStack { Text("Filename suffix"); TextField("none", text: $model.preferences.fileSuffix).textFieldStyle(.roundedBorder).frame(width: 110); Spacer(minLength: 0) }
             Toggle("Close Dice when finished", isOn: $model.preferences.closeWhenDone)
             Divider().padding(.vertical, 4)
@@ -257,7 +257,7 @@ struct DiceView: View {
             Toggle("Start at login", isOn: $model.preferences.startAtLogin)
             Toggle("Show in menu bar", isOn: $model.preferences.showInMenuBar)
             if model.preferences.showInMenuBar { Toggle("Drop images on the menu bar icon", isOn: $model.preferences.menuBarDrop).padding(.leading, 20) }
-            Picker("Drag files to reveal a drop target", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("Drag files to reveal a drop target", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
             if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off { Toggle("Start right after a drop", isOn: $model.preferences.dropStartsImmediately) }
             Toggle("Stay on top of other apps", isOn: $model.preferences.stayOnTop)
             if FinderMenu.isAvailable {
@@ -289,8 +289,8 @@ struct DiceView: View {
             Text("Image settings").font(DiceStyle.heading)
             Toggle("Metadata only", isOn: $model.options.metadataOnly)
             if !model.options.metadataOnly {
-                Picker("Format", selection: $model.options.format) { ForEach(OutputFormat.allCases) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) } }
-                Picker("Resize", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Format", selection: $model.options.format) { ForEach(OutputFormat.allCases) { format in Text(format.rawValue).tag(format).disabled(!Engine.canEncode(format)) } }.tint(.primary)
+                Picker("Resize", selection: $model.options.resize) { ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) } }.tint(.primary)
                 if model.options.resize == .edge { HStack { Text("Longest edge"); number($model.options.edge); Text("px") } }
                 if model.options.resize == .percent { HStack { Text("Scale"); number($model.options.percent); Text("%") } }
                 if model.options.resize == .fit { HStack { number($model.options.width); Text("×"); number($model.options.height); Text("px") } }
