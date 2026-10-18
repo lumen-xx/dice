@@ -138,6 +138,7 @@ struct DiceView: View {
             step(direction)
         })
         .onChange(of: model.settingsPresented) { if model.settingsPresented { imageSettingsPresented = false } }
+        .onChange(of: model.imports) { metadata = false; batch = false }
         .task(id: "\(model.selected?.uuidString ?? "")|\(previewKey ?? "")") { await loadPreview() }
         .alert("Dice couldn’t finish", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("OK") { model.alert = nil } } message: { Text(model.alert ?? "") }
     }
@@ -340,7 +341,10 @@ struct DiceView: View {
                         Picker("Drop target while dragging", selection: $model.preferences.dragTarget) { ForEach(DragTarget.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.inline).labelsHidden()
                     }
                 }
-                if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off {
+                SettingRow("Shake to open the drop target", info: "While you drag files, shake the pointer quickly left and right and the drop target opens right under it, wherever you are.") {
+                    RowSwitch(label: "Shake to open the drop target", isOn: $model.preferences.shakeForDropTarget)
+                }
+                if (model.preferences.showInMenuBar && model.preferences.menuBarDrop) || model.preferences.dragTarget != .off || model.preferences.shakeForDropTarget {
                     SettingRow("Start right after a drop") { RowSwitch(label: "Start right after a drop", isOn: $model.preferences.dropStartsImmediately) }
                 }
                 if FinderMenu.isAvailable {

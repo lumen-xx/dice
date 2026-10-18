@@ -31,6 +31,8 @@ struct AppPreferences: Codable, Equatable {
     var menuBarDrop = true
     var dropStartsImmediately = false
     var dragTarget: DragTarget = .off
+    /// Shaking the pointer while dragging files opens the drop target right under it.
+    var shakeForDropTarget = false
     var keepSmallerOriginal = true
     /// Opaque photos fill the window edge to edge; transparent images, SVGs and PDFs keep their margins.
     var fitToWindow = false
@@ -69,6 +71,7 @@ struct AppPreferences: Codable, Equatable {
         menuBarDrop = try c.decodeIfPresent(Bool.self, forKey: .menuBarDrop) ?? d.menuBarDrop
         dropStartsImmediately = try c.decodeIfPresent(Bool.self, forKey: .dropStartsImmediately) ?? d.dropStartsImmediately
         dragTarget = (try? c.decodeIfPresent(DragTarget.self, forKey: .dragTarget)) ?? d.dragTarget
+        shakeForDropTarget = try c.decodeIfPresent(Bool.self, forKey: .shakeForDropTarget) ?? d.shakeForDropTarget
         keepSmallerOriginal = try c.decodeIfPresent(Bool.self, forKey: .keepSmallerOriginal) ?? d.keepSmallerOriginal
     }
 }

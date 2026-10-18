@@ -934,6 +934,34 @@ final class EngineTests {
         XCTAssertTrue(text.contains("Lantern")); XCTAssertTrue(ImageSearch.matches("lantern 42", text: ImageSearch.text(filename: "a.png", path: "/tmp", info: nil, recognizedText: text)))
         XCTAssertEqual(ImageSearch.recognizedText(in: image(32)), "")
     }
+    func testShakeToOpenDropTarget() throws {
+        /// Feeds positions `step` seconds apart (120 Hz by default) and reports whether any of them counted as a shake.
+        func shakes(_ xs: [CGFloat], step: TimeInterval = 1.0 / 120) -> Bool {
+            var detector = ShakeDetector(); var hit = false
+            for (i, x) in xs.enumerated() where detector.shook(x: x, at: Double(i) * step) { hit = true }
+            return hit
+        }
+        func sweep(_ from: CGFloat, _ to: CGFloat, _ steps: Int) -> [CGFloat] { (1...steps).map { from + (to - from) * CGFloat($0) / CGFloat(steps) } }
+        // Two quick wiggles of 80 pt, a tenth of a second per sweep.
+        let wiggle = [CGFloat(0)] + sweep(0, 80, 12) + sweep(80, 0, 12) + sweep(0, 80, 12) + sweep(80, 0, 12)
+        XCTAssertTrue(shakes(wiggle))
+        // The same wiggle done slowly, a second per sweep.
+        XCTAssertTrue(!shakes(wiggle, step: 1.0 / 12))
+        // A steady 600 pt drag that jitters 4 pt back every few steps.
+        let steady: [CGFloat] = (0..<240).map { i -> CGFloat in
+            let jitter: CGFloat = i % 6 == 5 ? 4 : 0
+            return CGFloat(i) * 2.5 - jitter
+        }
+        XCTAssertTrue(!shakes(steady))
+        // Overshooting a target and coming back once.
+        XCTAssertTrue(!shakes([CGFloat(0)] + sweep(0, 300, 40) + sweep(300, 240, 10)))
+        // Quick wiggles of only 20 pt.
+        XCTAssertTrue(!shakes([CGFloat(0)] + sweep(0, 20, 6) + sweep(20, 0, 6) + sweep(0, 20, 6) + sweep(20, 0, 6) + sweep(0, 20, 6)))
+        // After a shake, counting starts afresh: the next half wiggle alone is not another shake.
+        var detector = ShakeDetector(); var count = 0
+        for (i, x) in (wiggle + sweep(0, 80, 12)).enumerated() where detector.shook(x: x, at: Double(i) / 120) { count += 1 }
+        XCTAssertEqual(count, 1)
+    }
     func testOpacityForFitToWindow() throws {
         func drawn(_ draw: (CGContext) -> Void) -> CGImage {
             let c = CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
@@ -1004,7 +1032,8 @@ final class EngineTests {
             ("background removal", suite.testBackgroundRemoval),
             ("JPEG XL output, lossless, metadata and target size", suite.testJPEGXL),
             ("text in images for search", suite.testRecognizedTextForSearch),
-            ("opacity for fit to window", suite.testOpacityForFitToWindow)
+            ("opacity for fit to window", suite.testOpacityForFitToWindow),
+            ("shake to open the drop target", suite.testShakeToOpenDropTarget)
         ]
         for (name, check) in checks {
             let before = failures

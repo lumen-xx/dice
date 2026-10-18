@@ -46,7 +46,9 @@ How to use them:
 
 Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. Toolbar symbol targets are 30 × 30 pt; root corners are 14 pt. The top-left close button matches the capsule material and dimensions of the top-right toolbar. There is no native title bar or traffic-light strip; the image surface and drag glow cover the entire window. Drag anywhere on the window to move it, including on the image itself (the image keeps its right-click menu). Minimize and fullscreen are disabled.
 
-The top-right toolbar carries Add, Metadata, Settings and Start. Start saves copies automatically. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard.
+The top-right toolbar carries Add, Metadata, Settings and Start. Start saves copies automatically. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard. Importing images by any route (drop, paste, Add, Finder, the menu bar or the drop target) leaves App settings, metadata or the batch list and shows the first new image as soon as it loads.
+
+The drop target (App settings › System) is a 168 pt rounded panel that opens dragged files in Dice. With **Drop target while dragging** set to a corner, it appears 14 pt from that corner of the screen itself, beside the Dock rather than above it, when a file drag reaches the corner. With **Shake to open the drop target**, shaking the pointer quickly left and right during a file drag opens it centred under the pointer, kept 8 pt inside the screen, and it stays there until the drag ends. The two can be used together. The panel sits above the Dock and never activates Dice.
 
 With **Fit photos to the window** (App settings › Window, off by default), an opaque photo fills the whole window edge to edge, behind the toolbar and pager. Edges that don't fit are hidden in the preview only, and the footer text gets the same capsule material as the pager. Images with any transparent pixels, and SVGs, PDFs and Illustrator files, keep the inset layout, so they're never cropped against the window material.
 
@@ -69,8 +71,8 @@ App settings share the editor surface and use the same plain rows as Image setti
 | New images | Format, Quality, Size, Metadata, Replace originals |
 | Saving | When finished, Save to, File name, Close Dice when finished |
 | Conversion | Keep animations, Animations in other formats, JPEG background, Keep the original when it's smaller |
-| Window | Fit photos to the window, Stay on top |
-| System | Start at login, Menu bar, Drop target, Start right after a drop, Finder menu |
+| Window | Fit photos to the window, Hide controls when not in use, Stay on top |
+| System | Start at login, Menu bar, Drop target, Shake to open the drop target, Start right after a drop, Finder menu |
 | Updates | Check automatically, Check now |
 
 A setting that used to be a switch plus a picker is one menu: Format ("Same as original" means no default), Save to ("Beside originals" or the chosen folder, with Choose folder…), and Metadata (Keep, Remove, Always remove). Switches are the monochrome `MonoSwitch`. Update checks are opt-in. Settings scroll inside the window with no scroll bar, and Back and the close control stay visible.

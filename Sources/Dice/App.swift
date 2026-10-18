@@ -65,7 +65,9 @@ final class DiceWindow: NSWindow {
     var isDevelopmentBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "DiceDevelopmentBuild") as? Bool == true }
     func applyPreferences(_ p: AppPreferences) {
         window?.level = p.stayOnTop ? .floating : .normal
-        if p.dragTarget != .off || dragWatcherCreated { dragWatcherCreated = true; dragWatcher.target = p.dragTarget }
+        if p.dragTarget != .off || p.shakeForDropTarget || dragWatcherCreated {
+            dragWatcherCreated = true; dragWatcher.target = p.dragTarget; dragWatcher.shake = p.shakeForDropTarget
+        }
         if p.showInMenuBar, statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             item.button?.image = NSImage(systemSymbolName: "die.face.5", accessibilityDescription: "Dice")

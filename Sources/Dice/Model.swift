@@ -34,6 +34,8 @@ struct ImageItem: Identifiable {
     @Published var options = Options() { didSet { if let data = try? JSONEncoder().encode(options) { UserDefaults.standard.set(data, forKey: "dice.options") } } }
     @Published var busy = false
     @Published var importing = false
+    /// Counts imports, so the window can leave metadata or the batch list and show the new image.
+    @Published private(set) var imports = 0
     @Published var status = "All processing stays on this Mac"
     @Published var alert: String?
     @Published var completed = 0
@@ -91,6 +93,9 @@ struct ImageItem: Identifiable {
         }
         closeRequested = false
         importing = true
+        // However the images arrive, Dice leaves App settings and shows the first new one as soon as it loads.
+        settingsPresented = false; imports += 1
+        var shown = false
         let cache = previewCache
         Task {
             for url in fresh {
@@ -114,7 +119,7 @@ struct ImageItem: Identifiable {
                 }.value
                 if closeRequested { break }
                 items.append(contentsOf: loaded)
-                if selected == nil { selected = loaded.first?.id }
+                if !shown, let first = loaded.first { selected = first.id; shown = true }
             }
             importing = false
             recognizeText(in: items.filter { $0.info != nil && $0.recognizedText.isEmpty })

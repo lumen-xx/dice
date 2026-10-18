@@ -1,3 +1,20 @@
+# v0.2.10 drop target in the corner, shake to open, imports leave settings — 2026-10-19
+
+All 55 standalone checks pass, one of them new.
+
+The corner drop target now sits 14 pt from the screen's own corner instead of 14 pt above the visible frame, which stops above the Dock. Fixed while checking this: the panel was set to the status bar level and then marked as a floating panel, which quietly put it back to the floating level (3), below the Dock (20). The level is now set after it and reads 25. The panel was shown briefly without a drag or activation, and its frame was read back: (14, 14) for the bottom-left corner on a 1710 × 1107 screen whose visible frame starts at y 86, and (1528, 14) for the bottom-right one. A screenshot shows it level with the Dock.
+
+New **Shake to open the drop target** (App settings › System, off by default). During a file drag, three quick changes of horizontal direction within 0.7 s open the drop target centred under the pointer, and it stays put until the drag ends. A change of direction counts only after the pointer comes back 30 pt from its furthest point (`ShakeDetector` in DiceCore).
+- The new check feeds the detector pointer paths at 120 Hz. It must spot two quick 80 pt wiggles. It must ignore the same wiggle done slowly, a steady drag that jitters 4 pt back, a single overshoot and wiggles of only 20 pt. After a shake it must start counting afresh.
+- Three mutations each make the check fail: a reach of 3 pt, a window of 5 s, and no reset after a shake.
+- The panel was shown at four pointer positions and kept 8 pt inside the screen at the edges: (800, 500) → (716, 416), (5, 500) → (8, 416), (1707, 2) → (1534, 8), (600, 1106) → (516, 931). A screenshot at the Dock shows it drawn above the Dock.
+
+Importing images by any route (drop, paste, Add, Finder, the menu bar or the drop target) now leaves App settings, metadata or the batch list. The first new image is selected and shown as soon as it loads, also when images are added to an existing batch.
+
+Not checked: a real file drag with a shake, and an import with settings open in the app. Both need the real pointer or Dice in front, and the Mac was in use.
+
+---
+
 # v0.2.9 move the window from the photo; hide controls — 2026-10-18
 
 All 54 standalone checks pass.

@@ -1,14 +1,16 @@
 import AppKit
+import DiceCore
 
 enum DragTarget: String, Codable, CaseIterable, Identifiable {
     case off = "Off", bottomLeft = "Bottom left corner", bottomRight = "Bottom right corner"
     var id: String { rawValue }
 }
 
-/// Watches for file drags anywhere on screen and, when the pointer reaches the chosen edge,
-/// reveals a small drop target that opens the dragged files in Dice.
+/// Watches for file drags anywhere on screen and reveals a small drop target that opens the dragged files in Dice:
+/// in the chosen corner when the pointer reaches it, or right under the pointer when it shakes.
 @MainActor final class DragDropWatcher {
-    var target: DragTarget = .off { didSet { if target == .off { hide() } } }
+    var target: DragTarget = .off { didSet { if target == .off && !shake { hide() } } }
+    var shake = false { didSet { if target == .off && !shake { hide() } } }
     var onDrop: ([URL]) -> Void = { _ in }
     var isAvailable: () -> Bool = { true }
     private var monitor: Any?
@@ -16,6 +18,9 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
     private var fileDrag = false
     private var panel: NSPanel?
     private var view: DropTargetView?
+    private var shaking = ShakeDetector()
+    /// Shown under the pointer by a shake: it stays there until the drag ends, so the files can be dropped on it.
+    private var pinned = false
 
     init() {
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
@@ -29,15 +34,17 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
     private func handle(_ type: NSEvent.EventType) {
         let drag = NSPasteboard(name: .drag)
         switch type {
-        case .leftMouseDown: downCount = drag.changeCount; fileDrag = false
+        case .leftMouseDown: downCount = drag.changeCount; fileDrag = false; pinned = false; shaking.reset()
         case .leftMouseDragged:
-            guard target != .off, isAvailable() else { return }
+            guard target != .off || shake, isAvailable(), !pinned else { return }
             if !fileDrag, drag.changeCount != downCount, drag.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) { fileDrag = true }
             guard fileDrag else { return }
             let point = NSEvent.mouseLocation
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }), inZone(point, screen.frame) { show(on: screen) }
+            guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else { return }
+            if shake, shaking.shook(x: point.x, at: ProcessInfo.processInfo.systemUptime) { pinned = true; show(on: screen, at: point) }
+            else if inZone(point, screen.frame) { show(on: screen) }
         case .leftMouseUp:
-            fileDrag = false
+            fileDrag = false; pinned = false; shaking.reset()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.hide() }
         default: break
         }
@@ -49,22 +56,31 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
         case .bottomRight: return p.x > f.maxX - 150 && p.y < f.minY + 150
         }
     }
-    private func show(on screen: NSScreen) {
+    /// Shows the drop target in the chosen corner, or centred on `pointer` (kept on the screen) after a shake.
+    private func show(on screen: NSScreen, at pointer: NSPoint? = nil) {
         if panel == nil {
             let content = DropTargetView(frame: NSRect(x: 0, y: 0, width: 168, height: 168))
             content.onDrop = { [weak self] urls in self?.hide(); self?.onDrop(urls) }
             let p = NSPanel(contentRect: content.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             p.contentView = content; p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true; p.invalidateShadow()
-            p.level = .statusBar; p.isFloatingPanel = true; p.hidesOnDeactivate = false
+            // isFloatingPanel resets the level to .floating, below the Dock, so the level is set after it.
+            p.isFloatingPanel = true; p.level = .statusBar; p.hidesOnDeactivate = false
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel = p; view = content
         }
         guard let panel else { return }
-        let f = screen.frame, v = screen.visibleFrame, size = panel.frame.size
+        // The screen's own corner, not the visible frame, which stops above the Dock. The panel's level is above the
+        // Dock, so it stays in view even where the Dock reaches the corner.
+        let f = screen.frame, size = panel.frame.size
         let origin: NSPoint
-        switch target {
-        case .bottomLeft, .off: origin = NSPoint(x: f.minX + 14, y: v.minY + 14)
-        case .bottomRight: origin = NSPoint(x: f.maxX - size.width - 14, y: v.minY + 14)
+        if let pointer {
+            origin = NSPoint(x: min(max(pointer.x - size.width / 2, f.minX + 8), f.maxX - size.width - 8),
+                             y: min(max(pointer.y - size.height / 2, f.minY + 8), f.maxY - size.height - 8))
+        } else {
+            switch target {
+            case .bottomLeft, .off: origin = NSPoint(x: f.minX + 14, y: f.minY + 14)
+            case .bottomRight: origin = NSPoint(x: f.maxX - size.width - 14, y: f.minY + 14)
+            }
         }
         panel.setFrameOrigin(origin)
         if !panel.isVisible {
