@@ -1,3 +1,13 @@
+# v0.2.11 rounded drop target corners — 2026-10-19
+
+All 55 standalone checks pass.
+
+Fixed: the drop target showed a pale square behind each rounded corner. A layer's corner radius doesn't clip a blur of what's behind the window, and the window's shadow follows that blur, so both kept the full square. The material now has a mask image with the same continuous rounded shape. The shadow is worked out again once the panel has drawn, instead of before it had any content.
+
+The panel was shown without a drag or activation and its window captured on its own, then flattened on a light background. Before the fix, a lighter square sits outside every corner. After it, the corner and its shadow follow the rounded edge. A capture of the screen region shows the same.
+
+---
+
 # v0.2.10 drop target in the corner, shake to open, imports leave settings — 2026-10-19
 
 All 55 standalone checks pass, one of them new.

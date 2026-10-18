@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import DiceCore
 
 enum DragTarget: String, Codable, CaseIterable, Identifiable {
@@ -62,7 +63,7 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
             let content = DropTargetView(frame: NSRect(x: 0, y: 0, width: 168, height: 168))
             content.onDrop = { [weak self] urls in self?.hide(); self?.onDrop(urls) }
             let p = NSPanel(contentRect: content.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            p.contentView = content; p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true; p.invalidateShadow()
+            p.contentView = content; p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true
             // isFloatingPanel resets the level to .floating, below the Dock, so the level is set after it.
             p.isFloatingPanel = true; p.level = .statusBar; p.hidesOnDeactivate = false
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -85,6 +86,8 @@ enum DragTarget: String, Codable, CaseIterable, Identifiable {
         panel.setFrameOrigin(origin)
         if !panel.isVisible {
             panel.alphaValue = 0; panel.orderFrontRegardless()
+            // The shadow follows the window's drawn, rounded shape; work it out again once the panel has drawn.
+            DispatchQueue.main.async { panel.invalidateShadow() }
             NSAnimationContext.runAnimationGroup { $0.duration = 0.15; panel.animator().alphaValue = 1 }
         }
     }
@@ -134,6 +137,18 @@ final class DropTargetView: NSVisualEffectView {
         tint.frame = bounds
         dashes.frame = bounds
         dashes.path = CGPath(roundedRect: bounds.insetBy(dx: 12, dy: 12), cornerWidth: Self.radius - 12, cornerHeight: Self.radius - 12, transform: nil)
+        if maskImage?.size != bounds.size { maskImage = Self.roundedMask(bounds.size) }
+    }
+    /// A layer's corner radius doesn't clip a blur of what's behind the window, and the window's shadow follows that
+    /// blur, so both stayed square at the corners. The mask gives the material, and with it the shadow, the same
+    /// rounded shape as the border.
+    private static func roundedMask(_ size: NSSize) -> NSImage {
+        NSImage(size: size, flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.addPath(RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: rect).cgPath)
+            context.setFillColor(.black); context.fillPath()
+            return true
+        }
     }
     func highlight(_ on: Bool) {
         let accent = DiceStyle.nsAccent
