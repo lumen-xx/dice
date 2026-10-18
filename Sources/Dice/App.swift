@@ -151,6 +151,7 @@ final class DiceWindow: NSWindow {
             w.collectionBehavior.insert(.fullScreenNone); w.level = model.preferences.stayOnTop ? .floating : .normal
             let effect = NSVisualEffectView(); effect.material = .hudWindow; effect.blendingMode = .behindWindow; effect.state = .active
             effect.wantsLayer = true; effect.layer?.cornerRadius = DiceStyle.cornerRadius; effect.layer?.masksToBounds = true
+            effect.maskImage = DiceStyle.windowMask()
             let hosting = DiceHostingView(rootView: DiceView(model: model, close: { [weak w] in w?.close() }, checkUpdates: { [weak self] in self?.updates.check(nil) })); hosting.translatesAutoresizingMaskIntoConstraints = false
             effect.addSubview(hosting)
             NSLayoutConstraint.activate([hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor), hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor), hosting.topAnchor.constraint(equalTo: effect.topAnchor), hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor)])
@@ -158,6 +159,8 @@ final class DiceWindow: NSWindow {
         }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil)
+        // The shadow follows the window's drawn, rounded shape; work it out again once the window has drawn.
+        DispatchQueue.main.async { [weak self] in self?.window?.invalidateShadow() }
     }
     func application(_ sender: NSApplication, open urls: [URL]) { openImages(urls) }
     func application(_ sender: NSApplication, openFiles filenames: [String]) { openImages(filenames.map { URL(fileURLWithPath: $0) }); sender.reply(toOpenOrPrint: .success) }

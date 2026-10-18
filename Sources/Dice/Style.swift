@@ -32,6 +32,17 @@ enum DiceStyle {
     static let inset: CGFloat = 16
     static let controlSize: CGFloat = 30
     static let cornerRadius: CGFloat = 14
+    /// A stretchable rounded-rectangle mask for a window's blurred material. A layer's corner radius doesn't clip a
+    /// blur of what's behind the window, and the window's shadow follows that blur, so without it both show a pale
+    /// square behind each rounded corner.
+    static func windowMask(radius: CGFloat = cornerRadius) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill(); NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill(); return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius); image.resizingMode = .stretch
+        return image
+    }
 
     private static func color(_ c: (Double, Double, Double)) -> Color { Color(.sRGB, red: c.0, green: c.1, blue: c.2) }
     private static func nsColor(_ c: (Double, Double, Double)) -> NSColor { NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: 1) }

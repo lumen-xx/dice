@@ -1,3 +1,13 @@
+# v0.2.12 rounded main window corners — 2026-10-19
+
+All 55 standalone checks pass.
+
+Fixed: the main window had the same pale square behind its rounded corners as the drop target. Its blurred material now has a stretchable rounded mask (`DiceStyle.windowMask`) that follows the window as it resizes. The shadow is worked out again once the window has drawn.
+
+A copy of the window setup was shown without activation and captured on its own, flattened on a light background. Without the mask, the corner shows a lighter square; with it, the corner is clean. After resizing from 420 × 300 to 560 × 380, all four corners and the shadow still follow the rounded edge. The rebuilt Dice Dev window's corners were captured the same way and are clean.
+
+---
+
 # v0.2.11 rounded drop target corners — 2026-10-19
 
 All 55 standalone checks pass.
