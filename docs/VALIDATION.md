@@ -1,3 +1,24 @@
+# v0.2.9 move the window from the photo; hide controls — 2026-10-18
+
+All 54 standalone checks pass.
+
+Fixed: with **Fit photos to the window** on, the window couldn't be moved. The photo covers the whole window, and its right-click menu makes SwiftUI treat it as a control, so a press on it never started a window drag. A plain left press on the photo, in either layout, now goes to a small AppKit view (`WindowDragArea`) that calls `performDrag`. Right-clicks and control-clicks pass through to the photo's menu, as `RightClickCatcher` does for the Start button. An earlier, unreleased attempt with SwiftUI's `WindowDragGesture` was never checked with a real drag and was replaced.
+
+Checked off-screen. A copy of the fill layout ran in a window at −12000, −12000 that never became active, with mouse events posted to its own queue:
+- A press in the middle of the photo, and one near its top, both reach the drag view and start a window drag.
+- A right-click and a control-click on the photo reach the hosting view, where the photo's menu lives.
+- The toolbar, pager and close buttons still run their actions.
+- A press on the window edge still resizes.
+- With the controls faded out, their spots move the window.
+- Without the new view (the old layout), no press on the photo starts a drag.
+- Drops are registered on SwiftUI's own drop view, not on the drag view.
+
+Not checked: a real on-screen drag with the mouse. A fullscreen game was in front of every window at the time.
+
+New **Hide controls when not in use** (App settings › Window, off by default). The close button, toolbar and footer fade out while Dice isn't the active app and the pointer isn't over its window. They stay visible while anything is in progress or open.
+
+---
+
 # v0.2.8 clean settings and fit to window — 2026-10-16
 
 All 54 standalone checks pass, one of them new: `Opacity.isOpaque` accepts an opaque image (with or without an alpha channel), and rejects one with a transparent strip and one that is half transparent.

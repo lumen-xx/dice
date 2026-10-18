@@ -34,6 +34,8 @@ struct AppPreferences: Codable, Equatable {
     var keepSmallerOriginal = true
     /// Opaque photos fill the window edge to edge; transparent images, SVGs and PDFs keep their margins.
     var fitToWindow = false
+    /// The close button, toolbar and footer fade out while Dice is in the background and the pointer is elsewhere.
+    var hideControlsWhenIdle = false
     init() {}
     private enum LegacyKeys: String, CodingKey { case fileSuffix }
     init(from decoder: Decoder) throws {
@@ -52,6 +54,7 @@ struct AppPreferences: Codable, Equatable {
         showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
         stayOnTop = try c.decodeIfPresent(Bool.self, forKey: .stayOnTop) ?? d.stayOnTop
         fitToWindow = try c.decodeIfPresent(Bool.self, forKey: .fitToWindow) ?? d.fitToWindow
+        hideControlsWhenIdle = try c.decodeIfPresent(Bool.self, forKey: .hideControlsWhenIdle) ?? d.hideControlsWhenIdle
         defaultReplaceOriginals = try c.decodeIfPresent(Bool.self, forKey: .defaultReplaceOriginals) ?? d.defaultReplaceOriginals
         defaultStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .defaultStripMetadata) ?? d.defaultStripMetadata
         alwaysStripMetadata = try c.decodeIfPresent(Bool.self, forKey: .alwaysStripMetadata) ?? d.alwaysStripMetadata

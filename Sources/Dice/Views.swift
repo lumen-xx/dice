@@ -23,6 +23,8 @@ struct DiceView: View {
     @State private var inspected: ImageInfo?
     @State private var previewError: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.controlActiveState) private var activeState
+    @State private var pointerInside = false
     var displayedURL: URL? { model.selection?.result.map { $0.previewURL ?? $0.url } ?? model.selection?.url }
     var previewKey: String? { model.selection?.previewCacheKey }
     var displayedPreview: NSImage? {
@@ -37,6 +39,13 @@ struct DiceView: View {
         guard model.preferences.fitToWindow, !model.busy, let item = model.selection, let key = previewKey, let preview = displayedPreview else { return false }
         if DocumentImage.isDocument(item.url) || displayedURL.map(DocumentImage.isDocument) == true { return false }
         return PreviewFill.isOpaque(preview, key: key)
+    }
+    /// With "Hide controls when not in use", the close button, toolbar and footer show only while Dice is the
+    /// active app, the pointer is over the window, or something is in progress or open.
+    var chromeVisible: Bool {
+        !model.preferences.hideControlsWhenIdle || pointerInside || activeState != .inactive || targeted
+            || model.busy || model.importing || imageSettingsPresented || exportPopoverPresented
+            || metadata || batch || model.settingsPresented || model.alert != nil
     }
     var currentInfo: ImageInfo? {
         let known = model.selection?.result == nil ? model.selection?.info : model.selection?.resultInfo
@@ -70,9 +79,12 @@ struct DiceView: View {
                         if fillsWindow {
                             Color.clear.overlay { Image(nsImage: preview).resizable().scaledToFill() }.clipped()
                                 .contextMenu { if let id = model.selected { removalMenu(id) } }
+                                .overlay(WindowDragArea())
                         } else {
-                            Image(nsImage: preview).resizable().scaledToFit().padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
+                            Image(nsImage: preview).resizable().scaledToFit()
                                 .contextMenu { if let id = model.selected { removalMenu(id) } }
+                                .overlay(WindowDragArea())
+                                .padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
                         }
                     } else if let error = previewError {
                         Text(error).font(DiceStyle.caption).foregroundStyle(.secondary).padding(30)
@@ -80,8 +92,10 @@ struct DiceView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
             }
             toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch || model.settingsPresented ? 56 : 0)
+                .opacity(chromeVisible ? 1 : 0)
             if !model.items.isEmpty && !model.settingsPresented {
                 VStack { Spacer(); HStack(spacing: 12) { footerSummary.modifier(OverPhoto(active: fillsWindow && !metadata && !batch)); Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
+                    .opacity(chromeVisible ? 1 : 0)
             }
         }
         .font(DiceStyle.body)
@@ -95,7 +109,10 @@ struct DiceView: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
                 .padding(DiceStyle.inset)
+                .opacity(chromeVisible ? 1 : 0)
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: chromeVisible)
+        .background(HoverCatcher { pointerInside = $0 })
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
             guard !model.busy && !model.importing else { return false }
             let group = DispatchGroup(); let urls = DropURLs()
@@ -306,6 +323,9 @@ struct DiceView: View {
             SettingSection("Window") {
                 SettingRow("Fit photos to the window", info: "Photos fill the whole window, edge to edge, behind the controls; edges that don't fit are hidden in the preview only. Transparent images, SVGs and PDFs keep their margins.") {
                     RowSwitch(label: "Fit photos to the window", isOn: $model.preferences.fitToWindow)
+                }
+                SettingRow("Hide controls when not in use", info: "The close button, toolbar and footer fade out while you're in another app and the pointer isn't over Dice, leaving just the image. Move over the window or click it to bring them back.") {
+                    RowSwitch(label: "Hide controls when not in use", isOn: $model.preferences.hideControlsWhenIdle)
                 }
                 SettingRow("Stay on top of other apps") { RowSwitch(label: "Stay on top of other apps", isOn: $model.preferences.stayOnTop) }
             }
@@ -633,5 +653,50 @@ struct OverPhoto: ViewModifier {
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 0.5))
         } else { content }
+    }
+}
+
+/// Reports whether the pointer is over the window, even while Dice is in the background (SwiftUI's hover only
+/// tracks the key window).
+struct HoverCatcher: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+    func makeNSView(context: Context) -> TrackingView { let view = TrackingView(); view.onChange = onChange; return view }
+    func updateNSView(_ view: TrackingView, context: Context) { view.onChange = onChange }
+    final class TrackingView: NSView {
+        var onChange: (Bool) -> Void = { _ in }
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            let inside = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+            DispatchQueue.main.async { self.onChange(inside) }
+        }
+        override func mouseEntered(with event: NSEvent) { onChange(true) }
+        override func mouseExited(with event: NSEvent) { onChange(false) }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// Dragging the photo moves the window, like dragging the empty background. The photo's right-click menu makes
+/// SwiftUI treat it as a control, so AppKit wouldn't move the window from it. This view takes only the plain left
+/// mouse-down, the mirror of RightClickCatcher: right-clicks and control-clicks still reach the photo's menu, and the
+/// toolbar and pager above it keep their clicks.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView { DragView() }
+    func updateNSView(_ view: DragView, context: Context) {}
+    final class DragView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent, event.type == .leftMouseDown, !event.modifierFlags.contains(.control) else { return nil }
+            return super.hitTest(point)
+        }
+        /// The first click moves the window even while Dice is in the background, as the empty background does.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+        // performDrag runs its own tracking loop until the mouse is released.
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
     }
 }

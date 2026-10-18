@@ -44,11 +44,13 @@ How to use them:
 
 ## Layout and interaction
 
-Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. Toolbar symbol targets are 30 × 30 pt; root corners are 14 pt. The top-left close button matches the capsule material and dimensions of the top-right toolbar. There is no native title bar or traffic-light strip; the image surface and drag glow cover the entire window. Minimize and fullscreen are disabled.
+Use a 4-point spacing grid: 4, 8, 12, 16, 20, 24. Shared edge inset is 16 pt. Toolbar symbol targets are 30 × 30 pt; root corners are 14 pt. The top-left close button matches the capsule material and dimensions of the top-right toolbar. There is no native title bar or traffic-light strip; the image surface and drag glow cover the entire window. Drag anywhere on the window to move it, including on the image itself (the image keeps its right-click menu). Minimize and fullscreen are disabled.
 
 The top-right toolbar carries Add, Metadata, Settings and Start. Start saves copies automatically. The bottom-right pager stays present in image, metadata and batch views. Its middle number opens the searchable batch list. Metadata and the batch list replace the image inside the same window, with a Back control; they never open another dashboard.
 
-With **Fit photos to the window** (App settings › General), an opaque photo fills the whole window edge to edge, behind the toolbar and pager. Edges that don't fit are hidden in the preview only, and the footer text gets the same capsule material as the pager. Images with any transparent pixels, and SVGs, PDFs and Illustrator files, keep the inset layout, so they're never cropped against the window material. The setting is off by default.
+With **Fit photos to the window** (App settings › Window, off by default), an opaque photo fills the whole window edge to edge, behind the toolbar and pager. Edges that don't fit are hidden in the preview only, and the footer text gets the same capsule material as the pager. Images with any transparent pixels, and SVGs, PDFs and Illustrator files, keep the inset layout, so they're never cropped against the window material.
+
+With **Hide controls when not in use** (App settings › Window, off by default), the close button, toolbar and footer fade out over 0.25 s whenever Dice isn't the active app and the pointer isn't over its window, leaving only the image. They return when the pointer enters the window, which is tracked even while Dice is in the background, or when Dice becomes active. They always stay visible while something is in progress or open: an import, processing, a drag over the window, a popover or alert, metadata, the batch list, or settings. Reduce Motion turns the fade into an instant change.
 
 Use restrained transitions and honour Reduce Motion. Avoid idle animation. Search is local and matches filename/path, image properties, tag names/values and recognised text. Removing a batch entry never deletes the original file.
 
