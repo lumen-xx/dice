@@ -1,3 +1,15 @@
+# v0.2.13 Command-scroll zoom, ExifTool 13.55 — 2026-11-23
+
+All 55 standalone checks pass, with ExifTool 13.55 bundled.
+
+New: Command-scroll or pinch zooms into the photo around the pointer, up to 16 times its fitted size. Zoomed in, a sharper preview (up to 4096 pixels) loads, the photo covers the window, and plain scrolling and dragging move around it instead of swiping to the next image or moving the window. Zooming back out, or another image, resets it.
+
+Command-scroll and plain scrolling were posted to a test copy's own window only: the photo zoomed, then covered the window and moved with scrolling, and the footer took the pager's capsule.
+
+ExifTool moves to 13.55. Homebrew's 13.55 install made `bin/exiftool` a shell wrapper, which packaging had copied in place of the script, failing 41 checks; packaging now bundles the Perl script from `libexec/bin`, unchanged. The bundled ExifTool runs from Dice Dev and reports 13.55.
+
+---
+
 # v0.2.12 rounded main window corners — 2026-10-19
 
 All 55 standalone checks pass.
