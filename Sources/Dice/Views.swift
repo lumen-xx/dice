@@ -25,6 +25,14 @@ struct DiceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.controlActiveState) private var activeState
     @State private var pointerInside = false
+    /// Command-scroll or pinch zoom into the photo; 1 is fitted. `pan` moves the zoomed photo from the middle.
+    @State private var zoom: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    /// A sharper preview, loaded once the photo is zoomed in.
+    @State private var sharpKey: String?
+    @State private var sharp: NSImage?
+    /// The size of the area the photo shows in, which a zoomed photo may cover.
+    @State private var photoArea: CGSize = .zero
     var displayedURL: URL? { model.selection?.result.map { $0.previewURL ?? $0.url } ?? model.selection?.url }
     var previewKey: String? { model.selection?.previewCacheKey }
     var displayedPreview: NSImage? {
@@ -76,25 +84,32 @@ struct DiceView: View {
                             Text(model.status).font(DiceStyle.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if let preview = displayedPreview {
-                        if fillsWindow {
-                            Color.clear.overlay { Image(nsImage: preview).resizable().scaledToFill() }.clipped()
+                        let shown = sharpKey == previewKey ? sharp ?? preview : preview
+                        let fill = fillsWindow
+                        if fill {
+                            Color.clear.overlay { Image(nsImage: shown).resizable().scaledToFill().scaleEffect(zoom).offset(pan) }.clipped()
                                 .contextMenu { if let id = model.selected { removalMenu(id) } }
-                                .overlay(WindowDragArea())
+                                .overlay(photoControls(preview, fill: true))
                         } else {
-                            Image(nsImage: preview).resizable().scaledToFit()
+                            Image(nsImage: shown).resizable().scaledToFit()
+                                .scaleEffect(zoom).offset(pan)
                                 .contextMenu { if let id = model.selected { removalMenu(id) } }
-                                .overlay(WindowDragArea())
+                                .overlay(photoControls(preview, fill: false))
                                 .padding(.horizontal, 20).padding(.top, 60).padding(.bottom, 52)
                         }
                     } else if let error = previewError {
                         Text(error).font(DiceStyle.caption).foregroundStyle(.secondary).padding(30)
                     } else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
+                .coordinateSpace(name: "photoArea")
+                .background(GeometryReader { geometry in
+                    Color.clear.onAppear { photoArea = geometry.size }.onChange(of: geometry.size) { photoArea = geometry.size }
+                })
             }
             toolbar.padding(DiceStyle.inset).padding(.leading, metadata || batch || model.settingsPresented ? 56 : 0)
                 .opacity(chromeVisible ? 1 : 0)
             if !model.items.isEmpty && !model.settingsPresented {
-                VStack { Spacer(); HStack(spacing: 12) { footerSummary.modifier(OverPhoto(active: fillsWindow && !metadata && !batch)); Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
+                VStack { Spacer(); HStack(spacing: 12) { footerSummary.modifier(OverPhoto(active: (fillsWindow || zoom > 1) && !metadata && !batch)); Spacer(minLength: 12); pager }.padding(DiceStyle.inset) }
                     .opacity(chromeVisible ? 1 : 0)
             }
         }
@@ -134,12 +149,14 @@ struct DiceView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: targeted)
         .tint(accent)
         .background(SwipeCatcher { direction in
-            guard !model.settingsPresented, !batch, !metadata, !model.busy, model.items.count > 1 else { return }
+            guard !model.settingsPresented, !batch, !metadata, !model.busy, zoom == 1, model.items.count > 1 else { return }
             step(direction)
         })
         .onChange(of: model.settingsPresented) { if model.settingsPresented { imageSettingsPresented = false } }
         .onChange(of: model.imports) { metadata = false; batch = false }
         .task(id: "\(model.selected?.uuidString ?? "")|\(previewKey ?? "")") { await loadPreview() }
+        .onChange(of: previewKey) { zoom = 1; pan = .zero }
+        .task(id: zoom > 1 ? previewKey : nil) { await loadSharp() }
         .alert("Dice couldn’t finish", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("OK") { model.alert = nil } } message: { Text(model.alert ?? "") }
     }
     var index: Int { model.items.firstIndex { $0.id == model.selected } ?? 0 }
@@ -502,6 +519,34 @@ struct DiceView: View {
     /// "Same as original" only shows Quality when some image in the batch is written in a lossy format.
     var usesQuality: Bool { model.items.contains { model.options.format.usesQuality(forInputType: $0.info?.type ?? "") } }
     func number(_ binding: Binding<Int>, label: String = "Resize value") -> some View { TextField("", value: binding, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 65).accessibilityLabel(label) }
+    /// Over the photo: dragging moves the window, or the photo once it's zoomed in; Command-scroll and pinch zoom.
+    func photoControls(_ preview: NSImage, fill: Bool) -> some View {
+        GeometryReader { geometry in
+            let frame = geometry.frame(in: .named("photoArea"))
+            let content = PhotoZoom.content(preview.size, in: frame.size, fill: fill)
+            let area = photoArea == .zero ? frame.size : photoArea
+            WindowDragArea(pan: zoom > 1 ? { by in pan = PhotoZoom.clamp(CGSize(width: pan.width + by.width, height: pan.height + by.height), zoom: zoom, content: content, frame: frame, area: area) } : nil)
+                .background(ZoomCatcher(zoomed: zoom > 1, onZoom: { factor, point, _ in
+                    let target = min(PhotoZoom.most, max(1, zoom * factor))
+                    if target <= 1.001 { zoom = 1; pan = .zero; return }
+                    // The point under the pointer stays there.
+                    let ratio = target / zoom
+                    let moved = CGSize(width: point.x - (point.x - pan.width) * ratio, height: point.y - (point.y - pan.height) * ratio)
+                    zoom = target
+                    pan = PhotoZoom.clamp(moved, zoom: target, content: content, frame: frame, area: area)
+                }, onPan: { by, _ in
+                    pan = PhotoZoom.clamp(CGSize(width: pan.width + by.width, height: pan.height + by.height), zoom: zoom, content: content, frame: frame, area: area)
+                }))
+        }
+    }
+    /// Zoomed in, the 1200-pixel preview would blur; a sharper one replaces it.
+    func loadSharp() async {
+        guard zoom > 1, let key = previewKey, sharpKey != key, let item = model.selection, let url = displayedURL else { return }
+        let page = item.result == nil ? item.page : 1
+        let image = await Task.detached(priority: .userInitiated) { autoreleasepool { try? Engine.previewImage(url, maxPixelSize: 4096, page: page) } }.value
+        guard !Task.isCancelled, previewKey == key, let image else { return }
+        sharp = NSImage(cgImage: image, size: .zero); sharpKey = key
+    }
     func loadPreview() async {
         guard let item = model.selection, let url = displayedURL else { preview = nil; inspected = nil; previewError = nil; return }
         let id = item.id
@@ -637,7 +682,8 @@ struct SwipeCatcher: NSViewRepresentable {
         }
         func stop() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
         private func handle(_ event: NSEvent) {
-            guard event.hasPreciseScrollingDeltas, event.momentumPhase == [], let window = view?.window, event.window === window else { return }
+            // Command-scroll zooms the photo (ZoomCatcher) rather than swiping.
+            guard event.hasPreciseScrollingDeltas, event.momentumPhase == [], !event.modifierFlags.contains(.command), let window = view?.window, event.window === window else { return }
             if event.phase == .began || event.phase == .mayBegin { travelled = 0; fired = false }
             guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return }
             // Fingers moving left → next image, whichever way the scrolling direction is set.
@@ -690,9 +736,12 @@ struct HoverCatcher: NSViewRepresentable {
 /// mouse-down, the mirror of RightClickCatcher: right-clicks and control-clicks still reach the photo's menu, and the
 /// toolbar and pager above it keep their clicks.
 struct WindowDragArea: NSViewRepresentable {
-    func makeNSView(context: Context) -> DragView { DragView() }
-    func updateNSView(_ view: DragView, context: Context) {}
+    /// Set while the photo is zoomed in: dragging moves the photo by this much instead (y going down).
+    var pan: ((CGSize) -> Void)? = nil
+    func makeNSView(context: Context) -> DragView { let view = DragView(); view.pan = pan; return view }
+    func updateNSView(_ view: DragView, context: Context) { view.pan = pan }
     final class DragView: NSView {
+        var pan: ((CGSize) -> Void)?
         override func hitTest(_ point: NSPoint) -> NSView? {
             guard let event = NSApp.currentEvent, event.type == .leftMouseDown, !event.modifierFlags.contains(.control) else { return nil }
             return super.hitTest(point)
@@ -701,6 +750,15 @@ struct WindowDragArea: NSViewRepresentable {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override var mouseDownCanMoveWindow: Bool { false }
         // performDrag runs its own tracking loop until the mouse is released.
-        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        override func mouseDown(with event: NSEvent) {
+            guard pan != nil, let window else { self.window?.performDrag(with: event); return }
+            NSCursor.closedHand.push()
+            var last = event.locationInWindow
+            while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]), next.type == .leftMouseDragged {
+                pan?(CGSize(width: next.locationInWindow.x - last.x, height: last.y - next.locationInWindow.y))
+                last = next.locationInWindow
+            }
+            NSCursor.pop()
+        }
     }
 }

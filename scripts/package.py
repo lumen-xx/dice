@@ -23,19 +23,19 @@ def prepare_tools(destination):
     webpversion = call(str(webpprefix / 'bin/cwebp'), '-version')
     if webpversion.splitlines()[0] != '1.6.0': raise SystemExit('This preview pins WebP 1.6.0.')
     version = call(str(exifprefix / 'bin/exiftool'), '-ver')
-    if version != '13.50': raise SystemExit('This preview pins ExifTool 13.50. Update the pin deliberately before using another version.')
+    if version != '13.55': raise SystemExit('This preview pins ExifTool 13.55. Update the pin deliberately before using another version.')
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copy2(renderer, destination / 'resvg')
     run('codesign', '--force', '--sign', '-', str(destination / 'resvg'))
     shutil.copy2(optimizer, destination / 'oxipng')
     run('codesign', '--force', '--sign', '-', str(destination / 'oxipng'))
     exif = destination / 'exiftool'; exif.mkdir(exist_ok=True)
-    script = (exifprefix / 'bin/exiftool').read_text()
-    script = '\n'.join(line for line in script.split('\n') if not (line.startswith('unshift @INC,') and '/opt/homebrew/' in line))
-    # The Artistic License asks for a notice in each changed file saying how it was changed.
-    first, rest = script.split('\n', 1)
-    script = first + '\n# Modified for Dice: the Homebrew-specific "unshift @INC" lines were removed so the bundled modules are used.\n' + rest
-    (exif / 'exiftool').write_text(script)
+    # Homebrew's bin/exiftool is a shell wrapper; the Perl script itself is in libexec/bin. It finds its modules in
+    # the lib folder beside it, where they're bundled, so it's copied unchanged.
+    script = exifprefix / 'libexec/bin/exiftool'
+    if not script.exists() or 'Image::ExifTool' not in script.read_text():
+        raise SystemExit("Homebrew's exiftool is not laid out as Dice expects (the Perl script in libexec/bin).")
+    shutil.copy2(script, exif / 'exiftool')
     lib = exif / 'lib'; lib.mkdir(exist_ok=True)
     source = exifprefix / 'libexec/lib/perl5'
     shutil.copytree(source / 'Image', lib / 'Image', dirs_exist_ok=True)
@@ -73,7 +73,7 @@ def prepare_tools(destination):
     shutil.copytree(BUILD / 'vendor/jxl', destination / 'jxl', dirs_exist_ok=True)
     for file in list((destination / 'jxl/lib').glob('*.dylib')) + [destination / 'jxl/bin/cjxl']: run('codesign', '--force', '--sign', '-', str(file))
     shutil.copytree(ROOT / 'vendor/licenses', destination / 'Licenses', dirs_exist_ok=True)
-    (destination / 'versions.txt').write_text('ExifTool 13.50\nresvg 0.48.1\noxipng 10.2.1\ncjxl 0.12.0\n' + call(str(binary), '-version') + '\n')
+    (destination / 'versions.txt').write_text('ExifTool 13.55\nresvg 0.48.1\noxipng 10.2.1\ncjxl 0.12.0\n' + call(str(binary), '-version') + '\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

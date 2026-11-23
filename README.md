@@ -20,7 +20,7 @@ Drop images, PDFs, SVGs or folders on the window, paste with ⌘V, or right-clic
 
 ## Build
 
-Needs Swift 5.9+, Python 3, Cargo, and Homebrew `exiftool` 13.50 and `webp` 1.6.0.
+Needs Swift 5.9+, Python 3, Cargo, and Homebrew `exiftool` 13.55 and `webp` 1.6.0.
 
 ```sh
 cargo install resvg --version 0.48.1 --locked --root build/vendor/resvg
